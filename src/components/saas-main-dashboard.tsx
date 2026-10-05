@@ -1500,7 +1500,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       const { data: dbTx, error: txErr } = await supabase
         .from("stock_transactions")
         .select("*")
-        .order("transaction_date", { ascending: false });
+        .order("created_at", { ascending: false });
 
       if (!txErr && dbTx) {
         setStockTransactions(dbTx.map(t => ({
@@ -1510,11 +1510,12 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
           quantity: Number(t.quantity),
           previous_quantity: t.previous_quantity !== null ? Number(t.previous_quantity) : null,
           new_quantity: Number(t.new_quantity),
-          transaction_date: t.transaction_date,
+          transaction_date: t.transaction_date || t.created_at,
           reference: t.reference,
           notes: t.notes,
           prescription_id: t.prescription_id,
-          created_by: t.created_by
+          created_by: t.created_by,
+          created_at: t.created_at
         })));
       }
 
