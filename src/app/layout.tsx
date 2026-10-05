@@ -16,7 +16,7 @@ const poppins = Poppins({
 });
 
 const isProd = process.env.NODE_ENV === "production";
-const defaultBasePath = isProd ? "/Dental_SoftwareUI" : "";
+const defaultBasePath = isProd ? "/Sameeksha_Dental_Software" : "";
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH !== undefined
   ? process.env.NEXT_PUBLIC_BASE_PATH

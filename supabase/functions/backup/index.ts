@@ -5,6 +5,7 @@ const allowedOrigins = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
   "https://jabeershaik786.github.io",
+  "https://skkarishma363.github.io",
 ];
 
 serve(async (req: Request) => {
@@ -29,20 +30,40 @@ serve(async (req: Request) => {
   if (req.method !== "POST") {
     return new Response(
       JSON.stringify({ success: false, error: "Method Not Allowed" }),
-      { status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      {
+        status: 405,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
     );
   }
 
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL") || Deno.env.get("NEXT_PUBLIC_SUPABASE_URL") || "";
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY") || "";
+    const supabaseUrl =
+      Deno.env.get("SUPABASE_URL") ||
+      Deno.env.get("NEXT_PUBLIC_SUPABASE_URL") ||
+      "";
+
+    const anonKey =
+      Deno.env.get("SUPABASE_ANON_KEY") ||
+      Deno.env.get("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY") ||
+      "";
 
     // 3. Authenticate Caller via Supabase Authorization Header
     const authHeader = req.headers.get("Authorization");
+
     if (!authHeader) {
       return new Response(
-        JSON.stringify({ success: false, error: "Authentication required." }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          success: false,
+          error: "Authentication required.",
+        }),
+        {
+          status: 401,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+          },
+        }
       );
     }
 
@@ -51,11 +72,24 @@ serve(async (req: Request) => {
       auth: { persistSession: false },
     });
 
-    const { data: { user }, error: userErr } = await userSupabase.auth.getUser();
+    const {
+      data: { user },
+      error: userErr,
+    } = await userSupabase.auth.getUser();
+
     if (userErr || !user) {
       return new Response(
-        JSON.stringify({ success: false, error: "Authentication required." }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          success: false,
+          error: "Authentication required.",
+        }),
+        {
+          status: 401,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+          },
+        }
       );
     }
 
@@ -68,23 +102,45 @@ serve(async (req: Request) => {
 
     if (profileErr || !profile || profile.role !== "owner") {
       return new Response(
-        JSON.stringify({ success: false, error: "Only the Owner can start a database backup." }),
-        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          success: false,
+          error: "Only the Owner can start a database backup.",
+        }),
+        {
+          status: 403,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+          },
+        }
       );
     }
 
     // 5. Record Persistent Backup Entry in backup_history Table First
     const { data: historyRow, error: historyErr } = await userSupabase
       .from("backup_history")
-      .insert({ status: "triggered" })
+      .insert({ status: "pending" })
       .select("id")
       .single();
 
     if (historyErr || !historyRow?.id) {
-      console.error("Diagnostic: Unable to record backup_history entry:", historyErr?.message);
+      console.error(
+        "Diagnostic: Unable to record backup_history entry:",
+        historyErr?.message
+      );
+
       return new Response(
-        JSON.stringify({ success: false, error: "Failed to initialize backup history entry." }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          success: false,
+          error: "Failed to initialize backup history entry.",
+        }),
+        {
+          status: 500,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+          },
+        }
       );
     }
 
@@ -92,18 +148,33 @@ serve(async (req: Request) => {
 
     // 6. Read GitHub Backup Secret Token (Server-Side Only)
     const githubToken = Deno.env.get("GITHUB_BACKUP_TRIGGER_TOKEN");
+
     if (!githubToken) {
       // Update record status to failed if configuration error occurs
-      await userSupabase.from("backup_history").update({ status: "failed" }).eq("id", backupId);
+      await userSupabase
+        .from("backup_history")
+        .update({ status: "failed" })
+        .eq("id", backupId);
+
       return new Response(
-        JSON.stringify({ success: false, error: "Server configuration error: GITHUB_BACKUP_TRIGGER_TOKEN missing." }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          success: false,
+          error:
+            "Server configuration error: GITHUB_BACKUP_TRIGGER_TOKEN missing.",
+        }),
+        {
+          status: 500,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+          },
+        }
       );
     }
 
-    // 7. Hardcoded Non-Secret GitHub Action Workflow Parameters
-    const githubOwner = "JabeerShaik786";
-    const githubRepo = "Dental_SoftwareUI";
+    // 7. Sameeksha GitHub Action Workflow Parameters
+    const githubOwner = "skkarishma363";
+    const githubRepo = "Sameeksha_Dental_Software";
     const workflowFilename = "dentpro-backup.yml";
     const githubRef = "main";
 
@@ -136,10 +207,23 @@ serve(async (req: Request) => {
       });
 
       // Update record status to failed if workflow dispatch fails
-      await userSupabase.from("backup_history").update({ status: "failed" }).eq("id", backupId);
+      await userSupabase
+        .from("backup_history")
+        .update({ status: "failed" })
+        .eq("id", backupId);
+
       return new Response(
-        JSON.stringify({ success: false, error: "Failed to trigger GitHub backup workflow." }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          success: false,
+          error: "Failed to trigger GitHub backup workflow.",
+        }),
+        {
+          status: 502,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+          },
+        }
       );
     }
 
@@ -151,12 +235,27 @@ serve(async (req: Request) => {
         workflow: workflowFilename,
         backup_id: backupId,
       }),
-      { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      {
+        status: 202,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+        },
+      }
     );
   } catch (_err) {
     return new Response(
-      JSON.stringify({ success: false, error: "Internal server error." }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({
+        success: false,
+        error: "Internal server error.",
+      }),
+      {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+        },
+      }
     );
   }
 });
