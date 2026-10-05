@@ -897,17 +897,17 @@ const Odontogram: React.FC<OdontogramProps> = ({
   );
 };
 
-// Predefined treatment base prices
-const TREATMENT_PRICES: Record<string, number> = {
-  "Consultation": 500,
-  "Scaling": 1500,
-  "Root Canal": 4500,
-  "Extraction": 2000,
-  "Filling": 1200,
-  "Implant": 25000,
-  "Crown": 5500,
-  "Braces": 35000
-};
+// Common treatment names
+const COMMON_TREATMENTS: string[] = [
+  "Consultation",
+  "Scaling",
+  "Root Canal",
+  "Extraction",
+  "Filling",
+  "Implant",
+  "Crown",
+  "Braces"
+];
 
 const menuItems = [
   { name: "Dashboard", icon: <Home className="h-[22px] w-[22px] shrink-0" strokeWidth={2} />, badge: null },
@@ -4649,7 +4649,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     );
 
     // Save treatment log into patient database
-    const treatmentCost = TREATMENT_PRICES[appt.treatment] || 500;
+    const treatmentCost = 0;
     const medicineCost = consultPrescription ? 800 : 0; // Simulate medicine cost flat ₹800
 
     let consultPatientUuid = patientItem.uuid;
@@ -5493,7 +5493,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
 
       // Auto-generate invoice
       const invoiceNum = `INV-${1000 + invoices.length + 1}`;
-      const treatmentCost = TREATMENT_PRICES[app.treatment] || 500;
+      const treatmentCost = 0;
       const invoiceItems = [{ description: `${app.treatment} Fee`, amount: treatmentCost }];
       const sub = treatmentCost;
       const tot = sub;
@@ -5539,7 +5539,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       } else {
         // Create quick invoice if not already created
         const invoiceNum = `INV-${1000 + invoices.length + 1}`;
-        const treatmentCost = TREATMENT_PRICES[app.treatment] || 500;
+        const treatmentCost = 0;
         const invoiceItems = [{ description: `${app.treatment} Fee`, amount: treatmentCost }];
         const sub = treatmentCost;
         const tot = sub;
@@ -7941,7 +7941,7 @@ ${clinicName}`;
 
         // Synchronize with Treatments History Log
         const doctorObj = doctors.find(d => d.name === chartDoctor);
-        const treatCostVal = Number(chartCost) || TREATMENT_PRICES[chartTreatmentName.trim()] || 0;
+        const treatCostVal = Number(chartCost) || 0;
         const treatDateVal = chartDate || new Date().toISOString().split("T")[0];
 
         const dbInsertRows = targetTeeth.map(tIdx => {
@@ -8566,15 +8566,12 @@ ${clinicName}`;
                                             value={chartTreatmentName}
                                             onChange={e => {
                                               setChartTreatmentName(e.target.value);
-                                              if (TREATMENT_PRICES[e.target.value]) {
-                                                setChartCost(String(TREATMENT_PRICES[e.target.value]));
-                                              }
                                             }}
                                             required
                                           >
                                             <option value="">-- Choose Procedure --</option>
-                                            {Object.keys(TREATMENT_PRICES).map(t => (
-                                              <option key={t} value={t}>{t} (₹{TREATMENT_PRICES[t].toLocaleString()})</option>
+                                            {COMMON_TREATMENTS.map(t => (
+                                              <option key={t} value={t}>{t}</option>
                                             ))}
                                           </select>
                                         </div>
@@ -9095,15 +9092,12 @@ ${clinicName}`;
                             value={newTrName}
                             onChange={e => {
                               setNewTrName(e.target.value);
-                              if (TREATMENT_PRICES[e.target.value]) {
-                                setNewTrCost(String(TREATMENT_PRICES[e.target.value]));
-                              }
                             }}
                             required
                           >
                             <option value="">-- Choose Procedure --</option>
-                            {Object.keys(TREATMENT_PRICES).map(t => (
-                              <option key={t} value={t}>{t} (₹{TREATMENT_PRICES[t]})</option>
+                            {COMMON_TREATMENTS.map(t => (
+                              <option key={t} value={t}>{t}</option>
                             ))}
                           </select>
                         </div>
@@ -9218,7 +9212,7 @@ ${clinicName}`;
                             required
                           >
                             <option value="">-- Select --</option>
-                            {Object.keys(TREATMENT_PRICES).map(t => (
+                            {COMMON_TREATMENTS.map(t => (
                               <option key={t} value={t}>{t}</option>
                             ))}
                           </select>
@@ -9410,14 +9404,11 @@ ${clinicName}`;
                         value={invProcedure}
                         onChange={e => {
                           setInvProcedure(e.target.value);
-                          if (TREATMENT_PRICES[e.target.value]) {
-                            setInvAmount(String(TREATMENT_PRICES[e.target.value]));
-                          }
                         }}
                         required
                       >
                         <option value="">-- Choose Procedure --</option>
-                        {Object.keys(TREATMENT_PRICES).map(t => (
+                        {COMMON_TREATMENTS.map(t => (
                           <option key={t} value={t}>{t}</option>
                         ))}
                       </select>
@@ -10877,7 +10868,7 @@ ${clinicName}`;
     const pat = patients.find(p => p.name === tr.patient || p.id === tr.patient);
     const patName = tr.patient || "Patient";
     const patId = pat?.id || "DS-1001";
-    const cost = tr.cost || (tr.name.includes("Implant") ? 35000 : tr.name.includes("Crown") ? 12000 : tr.name.includes("Orthodontic") ? 45000 : tr.name.includes("Scaling") ? 2500 : tr.name.includes("Extraction") ? 3500 : 8500);
+    const cost = tr.cost || 0;
     const paid = tr.stage === "Completed" ? cost : Math.round(cost * 0.6);
     const remaining = cost - paid;
     const invId = `INV-${tr.id.replace(/\D/g, '') || '1001'}`;
@@ -11175,7 +11166,7 @@ ${clinicName}`;
                   const total = visits.length;
                   const completed = visits.filter(v => v.isCompleted).length;
                   const planName = tr.treatmentPlan || tr.name;
-                  const costVal = tr.cost !== undefined && tr.cost > 0 ? tr.cost : (planName.includes("Implant") ? 35000 : planName.includes("Crown") ? 12000 : planName.includes("Orthodontic") ? 45000 : planName.includes("Scaling") ? 2500 : planName.includes("Extraction") ? 3500 : 8500);
+                  const costVal = tr.cost !== undefined && tr.cost > 0 ? tr.cost : 0;
                   const isCompleted = tr.stage === "Completed" || (total > 0 && completed === total);
 
                   return (
@@ -13944,7 +13935,7 @@ ${clinicName}`;
               <div className="text-xs font-semibold space-y-2">
                 <div className="flex justify-between border-b pb-2">
                   <span>Base treatment:</span>
-                  <span>{appt.treatment} (₹{(TREATMENT_PRICES[appt.treatment] || 500).toLocaleString()})</span>
+                  <span>{appt.treatment}</span>
                 </div>
                 <div className="flex justify-between border-b pb-2">
                   <span>Meds subtotal:</span>
@@ -13952,7 +13943,7 @@ ${clinicName}`;
                 </div>
                 <div className="flex justify-between font-black text-sm">
                   <span>Subtotal:</span>
-                  <span>₹{((TREATMENT_PRICES[appt.treatment] || 500) + (consultPrescription ? 800 : 0)).toLocaleString()}</span>
+                  <span>₹{consultPrescription ? "800" : "0"}</span>
                 </div>
               </div>
 
@@ -14653,8 +14644,8 @@ ${clinicName}`;
                       <div className="space-y-1.5">
                         <Label htmlFor="apptTreatment">Treatment Category</Label>
                         <select id="apptTreatment" className="flex h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-808 focus:outline-none dark:bg-slate-955 dark:border-slate-800" value={apptTreatment} onChange={e => setApptTreatment(e.target.value)}>
-                          {Object.keys(TREATMENT_PRICES).map(t => (
-                            <option key={t} value={t}>{t} (₹{TREATMENT_PRICES[t]})</option>
+                          {COMMON_TREATMENTS.map(t => (
+                            <option key={t} value={t}>{t}</option>
                           ))}
                         </select>
                       </div>
@@ -15591,7 +15582,7 @@ ${clinicName}`;
                         value={slotTreatment}
                         onChange={e => setSlotTreatment(e.target.value)}
                       >
-                        {Object.keys(TREATMENT_PRICES).map(t => (
+                        {COMMON_TREATMENTS.map(t => (
                           <option key={t} value={t}>{t}</option>
                         ))}
                       </select>
