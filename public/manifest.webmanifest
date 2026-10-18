@@ -1,28 +1,28 @@
 {
-  "name": "DentPro OS",
-  "short_name": "DentPro OS",
-  "description": "Dental Practice Management Software",
-  "start_url": "/Sameeksha_Dental_Software/",
-  "scope": "/Sameeksha_Dental_Software/",
+  "name": "Sameeksha Super Speciality Dental Hospital & Implant Centre",
+  "short_name": "Sameeksha Dental",
+  "description": "Sameeksha Super Speciality Dental Hospital & Implant Centre in Ramanayyapeta provides comprehensive dental care and implants.",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "theme_color": "#2563eb",
+  "theme_color": "#E71B1E",
   "background_color": "#ffffff",
   "icons": [
     {
-      "src": "/Sameeksha_Dental_Software/icon-192.png",
+      "src": "./icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/Sameeksha_Dental_Software/icon-512.png",
+      "src": "./icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/Sameeksha_Dental_Software/apple-touch-icon.png",
+      "src": "./apple-touch-icon.png",
       "sizes": "180x180",
       "type": "image/png"
     }

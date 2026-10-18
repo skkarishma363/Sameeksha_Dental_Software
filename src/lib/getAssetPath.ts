@@ -4,10 +4,28 @@ export const getAssetPath = (path: string): string => {
     return path;
   }
 
-  const envBasePath = process.env.NEXT_PUBLIC_BASE_PATH;
-  const isProd = process.env.NODE_ENV === "production";
-  const defaultBasePath = isProd ? "/Sameeksha_Dental_Software" : "";
-  const basePath = envBasePath !== undefined ? envBasePath : defaultBasePath;
+  // 1. Check explicit build-time environment variable
+  let basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
+  // 2. In browser runtime, adapt based on active hostname and pathname
+  if (typeof window !== "undefined") {
+    const hostname = window.location.hostname;
+    const pathname = window.location.pathname;
+
+    // Custom domain (sameekshadental.com) and local development run from root
+    if (
+      hostname === "sameekshadental.com" ||
+      hostname === "www.sameekshadental.com" ||
+      hostname === "localhost" ||
+      hostname === "127.0.0.1"
+    ) {
+      basePath = "";
+    } else if (pathname.startsWith("/Sameeksha_Dental_Software")) {
+      // Direct GitHub Pages repository subpath
+      basePath = "/Sameeksha_Dental_Software";
+    }
+  }
+
   const cleanPath = path.startsWith("/") ? path : `/${path}`;
 
   const encodedPath = cleanPath
@@ -20,5 +38,5 @@ export const getAssetPath = (path: string): string => {
     return cleanPath;
   }
 
-  return `${basePath}${encodedPath}`;
+  return basePath ? `${basePath}${encodedPath}` : encodedPath;
 };

@@ -22,12 +22,8 @@ const playfair = Playfair_Display({
   style: ["normal", "italic"],
 });
 
-const isProd = process.env.NODE_ENV === "production";
-const defaultBasePath = isProd ? "/Sameeksha_Dental_Software" : "";
-
-const basePath = process.env.NEXT_PUBLIC_BASE_PATH !== undefined
-  ? process.env.NEXT_PUBLIC_BASE_PATH
-  : defaultBasePath;
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+const cleanBase = basePath.endsWith("/") ? basePath.slice(0, -1) : basePath;
 
 export const metadata: Metadata = {
   title: "Sameeksha Super Speciality Dental Hospital & Implant Centre | Ramanayyapeta",
@@ -64,16 +60,16 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: `${basePath}/favicon.ico`, sizes: "any" },
-      { url: `${basePath}/favicon-16x16.png`, sizes: "16x16", type: "image/png" },
-      { url: `${basePath}/favicon-32x32.png`, sizes: "32x32", type: "image/png" },
-      { url: `${basePath}/favicon-48x48.png`, sizes: "48x48", type: "image/png" },
+      { url: `${cleanBase}/favicon.ico`, sizes: "any" },
+      { url: `${cleanBase}/favicon-16x16.png`, sizes: "16x16", type: "image/png" },
+      { url: `${cleanBase}/favicon-32x32.png`, sizes: "32x32", type: "image/png" },
+      { url: `${cleanBase}/favicon-48x48.png`, sizes: "48x48", type: "image/png" },
     ],
     apple: [
-      { url: `${basePath}/apple-touch-icon.png`, sizes: "180x180", type: "image/png" },
+      { url: `${cleanBase}/apple-touch-icon.png`, sizes: "180x180", type: "image/png" },
     ],
   },
-  manifest: `${basePath}/manifest.webmanifest`,
+  manifest: `${cleanBase}/manifest.webmanifest`,
 };
 
 export const viewport: Viewport = {

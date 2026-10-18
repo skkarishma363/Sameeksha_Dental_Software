@@ -1,15 +1,14 @@
 import type { NextConfig } from "next";
 
-const isProd = process.env.NODE_ENV === "production";
-const defaultBasePath = isProd ? "/Sameeksha_Dental_Software" : "";
-
-const basePath = process.env.NEXT_PUBLIC_BASE_PATH !== undefined
-  ? process.env.NEXT_PUBLIC_BASE_PATH
-  : defaultBasePath;
+// For custom domain (https://sameekshadental.com/), basePath is root (undefined).
+// When deploying to a GitHub Pages subpath (*.github.io/Sameeksha_Dental_Software),
+// pass NEXT_PUBLIC_BASE_PATH=/Sameeksha_Dental_Software.
+const rawBasePath = process.env.NEXT_PUBLIC_BASE_PATH?.trim();
+const basePath = rawBasePath ? rawBasePath : undefined;
 
 const nextConfig: NextConfig = {
   output: "export",
-  basePath: basePath || undefined,
+  basePath,
   images: {
     unoptimized: true,
   },
