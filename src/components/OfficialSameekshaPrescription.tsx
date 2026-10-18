@@ -153,42 +153,42 @@ export const OfficialSameekshaPrescription: React.FC<OfficialSameekshaPrescripti
 
     // Optional diagnosis / clinical note at top of Rx area if provided
     if (diagnosis.trim()) {
-      const diagLines = wrapText(diagnosis.trim(), 70);
+      const diagLines = wrapText(diagnosis.trim(), 64);
       const entryLines = [
-        { x: 85, y: curY, text: "Diagnosis: ", bold: true, color: "#002244", size: 17 },
+        { x: 85, y: curY, text: "Diagnosis: ", bold: true, color: "#002244", size: 20 },
       ];
       diagLines.forEach((l, idx) => {
         entryLines.push({
-          x: idx === 0 ? 175 : 85,
-          y: curY + idx * 22,
+          x: idx === 0 ? 190 : 85,
+          y: curY + idx * 25,
           text: l,
           bold: false,
           color: "#1e293b",
-          size: 16,
+          size: 19,
         });
       });
       elements.push({ type: "diagnosis", y: curY, lines: entryLines });
-      curY += Math.max(26, diagLines.length * 22 + 10);
+      curY += Math.max(30, diagLines.length * 25 + 10);
     }
 
     // Prescribed Medicines
     parsedMeds.forEach((med, idx) => {
       const itemNum = `${idx + 1}.`;
-      const nameLines = wrapText(med.name.trim(), 55);
+      const nameLines = wrapText(med.name.trim(), 48);
       const entryLines: Array<{ x: number; y: number; text: string; bold?: boolean; color?: string; size?: number }> = [];
 
       // Medicine Name
       nameLines.forEach((nl, nIdx) => {
         entryLines.push({
-          x: nIdx === 0 ? 85 : 115,
-          y: curY + nIdx * 24,
+          x: nIdx === 0 ? 85 : 120,
+          y: curY + nIdx * 28,
           text: nIdx === 0 ? `${itemNum}  ${nl}` : nl,
           bold: true,
           color: "#002244",
-          size: 19,
+          size: 22,
         });
       });
-      curY += nameLines.length * 24 + 4;
+      curY += nameLines.length * 28 + 4;
 
       // Dosage, Timing, Duration line
       const subParts: string[] = [];
@@ -198,66 +198,66 @@ export const OfficialSameekshaPrescription: React.FC<OfficialSameekshaPrescripti
 
       if (subParts.length > 0) {
         const subStr = subParts.join("   |   ");
-        const subLines = wrapText(subStr, 68);
+        const subLines = wrapText(subStr, 58);
         subLines.forEach((sl, sIdx) => {
           entryLines.push({
-            x: 115,
-            y: curY + sIdx * 20,
+            x: 120,
+            y: curY + sIdx * 24,
             text: sl,
             bold: false,
             color: "#1e293b",
-            size: 16,
+            size: 19,
           });
         });
-        curY += subLines.length * 20 + 2;
+        curY += subLines.length * 24 + 3;
       }
 
       // Instructions / Advice
       if (med.instructions && med.instructions.trim()) {
         const instStr = `Instructions: ${med.instructions.trim()}`;
-        const instLines = wrapText(instStr, 70);
+        const instLines = wrapText(instStr, 60);
         instLines.forEach((il, iIdx) => {
           entryLines.push({
-            x: 115,
-            y: curY + iIdx * 20,
+            x: 120,
+            y: curY + iIdx * 23,
             text: il,
             bold: false,
             color: "#475569",
-            size: 15,
+            size: 18,
           });
         });
-        curY += instLines.length * 20 + 2;
+        curY += instLines.length * 23 + 3;
       }
 
-      curY += 14; // gap between medicine entries
+      curY += 16; // gap between medicine entries
       elements.push({ type: "medicine", y: curY, lines: entryLines });
     });
 
     // Doctor Advice & Instructions
     if (advice.trim()) {
-      curY += 12;
+      curY += 14;
       const adviceEntryLines: Array<{ x: number; y: number; text: string; bold?: boolean; color?: string; size?: number }> = [
-        { x: 85, y: curY, text: "Doctor Advice & Instructions:", bold: true, color: "#002244", size: 18 },
+        { x: 85, y: curY, text: "Doctor Advice & Instructions:", bold: true, color: "#002244", size: 21 },
       ];
-      curY += 26;
+      curY += 30;
 
       const paragraphs = advice.split("\n");
       for (const p of paragraphs) {
         if (!p.trim()) continue;
         const pClean = p.trim().startsWith("•") || p.trim().startsWith("-") ? p.trim() : `• ${p.trim()}`;
-        const wrappedP = wrapText(pClean, 72);
+        const wrappedP = wrapText(pClean, 62);
         wrappedP.forEach((wl, wIdx) => {
           adviceEntryLines.push({
-            x: wIdx === 0 ? 115 : 130,
+            x: wIdx === 0 ? 120 : 138,
             y: curY,
             text: wl,
             bold: false,
             color: "#1e293b",
-            size: 16,
+            size: 19,
           });
-          curY += 22;
+          curY += 26;
         });
-        curY += 4;
+        curY += 6;
       }
       elements.push({ type: "advice", y: curY, lines: adviceEntryLines });
     }
@@ -305,7 +305,7 @@ export const OfficialSameekshaPrescription: React.FC<OfficialSameekshaPrescripti
             .ps-field-text {
               font-family: 'Segoe UI', Arial, -apple-system, BlinkMacSystemFont, sans-serif;
               font-weight: 700;
-              font-size: 21px;
+              font-size: 24px;
               fill: #002244;
             }
           `}</style>
@@ -322,7 +322,7 @@ export const OfficialSameekshaPrescription: React.FC<OfficialSameekshaPrescripti
             x="190"
             y="432"
             className="ps-field-text"
-            fontSize={fullName.length > 28 ? "18px" : "21px"}
+            fontSize={fullName.length > 28 ? "21px" : "24px"}
           >
             {fullName}
           </text>
@@ -355,7 +355,7 @@ export const OfficialSameekshaPrescription: React.FC<OfficialSameekshaPrescripti
                 y={line.y}
                 fontFamily="'Segoe UI', Arial, -apple-system, BlinkMacSystemFont, sans-serif"
                 fontWeight={line.bold ? "700" : "500"}
-                fontSize={line.size || 16}
+                fontSize={line.size || 19}
                 fill={line.color || "#1e293b"}
               >
                 {line.text}
@@ -369,10 +369,10 @@ export const OfficialSameekshaPrescription: React.FC<OfficialSameekshaPrescripti
         {/* ============================================================== */}
         <text
           x="720"
-          y="1345"
+          y="1342"
           fontFamily="'Segoe UI', Arial, -apple-system, BlinkMacSystemFont, sans-serif"
           fontWeight="700"
-          fontSize="20px"
+          fontSize="23px"
           fill="#002244"
         >
           {doctorName || "Dr. Suvarna Raju.P"}
@@ -382,7 +382,7 @@ export const OfficialSameekshaPrescription: React.FC<OfficialSameekshaPrescripti
           y="1368"
           fontFamily="'Segoe UI', Arial, -apple-system, BlinkMacSystemFont, sans-serif"
           fontWeight="500"
-          fontSize="15px"
+          fontSize="17px"
           fill="#64748b"
         >
           Authorized Signature

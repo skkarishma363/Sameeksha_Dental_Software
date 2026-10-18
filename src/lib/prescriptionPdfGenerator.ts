@@ -81,7 +81,7 @@ export async function downloadSameekshaPrescriptionPDF(
         ).trim();
 
         if (fullName) {
-          const fontSize = fullName.length > 28 ? 18 : 21;
+          const fontSize = fullName.length > 28 ? 21 : 24;
           ctx.font = `bold ${fontSize}px 'Segoe UI', Arial, -apple-system, sans-serif`;
           ctx.fillStyle = "#002244";
           ctx.textBaseline = "alphabetic";
@@ -106,7 +106,7 @@ export async function downloadSameekshaPrescriptionPDF(
         }
 
         if (ageSexDisplay) {
-          ctx.font = "bold 21px 'Segoe UI', Arial, -apple-system, sans-serif";
+          ctx.font = "bold 24px 'Segoe UI', Arial, -apple-system, sans-serif";
           ctx.fillStyle = "#002244";
           ctx.textBaseline = "alphabetic";
           ctx.fillText(ageSexDisplay, 805, 432);
@@ -123,7 +123,7 @@ export async function downloadSameekshaPrescriptionPDF(
           });
 
         if (finalDate) {
-          ctx.font = "bold 21px 'Segoe UI', Arial, -apple-system, sans-serif";
+          ctx.font = "bold 24px 'Segoe UI', Arial, -apple-system, sans-serif";
           ctx.fillStyle = "#002244";
           ctx.textBaseline = "alphabetic";
           ctx.fillText(finalDate, 780, 492);
@@ -137,30 +137,30 @@ export async function downloadSameekshaPrescriptionPDF(
 
         // Optional Diagnosis
         if (data.diagnosis && data.diagnosis.trim()) {
-          ctx.font = "bold 17px 'Segoe UI', Arial, -apple-system, sans-serif";
+          ctx.font = "bold 20px 'Segoe UI', Arial, -apple-system, sans-serif";
           ctx.fillStyle = "#002244";
           ctx.fillText("Diagnosis: ", 85, curY);
 
-          ctx.font = "normal 16px 'Segoe UI', Arial, -apple-system, sans-serif";
+          ctx.font = "normal 19px 'Segoe UI', Arial, -apple-system, sans-serif";
           ctx.fillStyle = "#1e293b";
-          const diagLines = wrapLines(data.diagnosis.trim(), 70);
+          const diagLines = wrapLines(data.diagnosis.trim(), 64);
           diagLines.forEach((l, idx) => {
-            ctx.fillText(l, idx === 0 ? 175 : 85, curY + idx * 22);
+            ctx.fillText(l, idx === 0 ? 190 : 85, curY + idx * 25);
           });
-          curY += Math.max(26, diagLines.length * 22 + 10);
+          curY += Math.max(30, diagLines.length * 25 + 10);
         }
 
         // Medicines
         parsedMeds.forEach((med, idx) => {
           const itemNum = `${idx + 1}.`;
-          const nameLines = wrapLines(med.name.trim(), 55);
+          const nameLines = wrapLines(med.name.trim(), 48);
 
-          ctx.font = "bold 19px 'Segoe UI', Arial, -apple-system, sans-serif";
+          ctx.font = "bold 22px 'Segoe UI', Arial, -apple-system, sans-serif";
           ctx.fillStyle = "#002244";
           nameLines.forEach((nl, nIdx) => {
-            ctx.fillText(nIdx === 0 ? `${itemNum}  ${nl}` : nl, nIdx === 0 ? 85 : 115, curY + nIdx * 24);
+            ctx.fillText(nIdx === 0 ? `${itemNum}  ${nl}` : nl, nIdx === 0 ? 85 : 120, curY + nIdx * 28);
           });
-          curY += nameLines.length * 24 + 4;
+          curY += nameLines.length * 28 + 4;
 
           const subParts: string[] = [];
           if (med.dosage) subParts.push(`Dosage: ${med.dosage}`);
@@ -168,58 +168,58 @@ export async function downloadSameekshaPrescriptionPDF(
           if (med.duration) subParts.push(`Duration: ${med.duration}`);
 
           if (subParts.length > 0) {
-            ctx.font = "normal 16px 'Segoe UI', Arial, -apple-system, sans-serif";
+            ctx.font = "normal 19px 'Segoe UI', Arial, -apple-system, sans-serif";
             ctx.fillStyle = "#1e293b";
             const subStr = subParts.join("   |   ");
-            const subLines = wrapLines(subStr, 68);
+            const subLines = wrapLines(subStr, 58);
             subLines.forEach((sl, sIdx) => {
-              ctx.fillText(sl, 115, curY + sIdx * 20);
+              ctx.fillText(sl, 120, curY + sIdx * 24);
             });
-            curY += subLines.length * 20 + 2;
+            curY += subLines.length * 24 + 3;
           }
 
           if (med.instructions && med.instructions.trim()) {
-            ctx.font = "normal 15px 'Segoe UI', Arial, -apple-system, sans-serif";
+            ctx.font = "normal 18px 'Segoe UI', Arial, -apple-system, sans-serif";
             ctx.fillStyle = "#475569";
-            const instLines = wrapLines(`Instructions: ${med.instructions.trim()}`, 70);
+            const instLines = wrapLines(`Instructions: ${med.instructions.trim()}`, 60);
             instLines.forEach((il, iIdx) => {
-              ctx.fillText(il, 115, curY + iIdx * 20);
+              ctx.fillText(il, 120, curY + iIdx * 23);
             });
-            curY += instLines.length * 20 + 2;
+            curY += instLines.length * 23 + 3;
           }
 
-          curY += 14;
+          curY += 16;
         });
 
         // Doctor Advice & Instructions
         if (data.advice && data.advice.trim()) {
-          curY += 12;
-          ctx.font = "bold 18px 'Segoe UI', Arial, -apple-system, sans-serif";
+          curY += 14;
+          ctx.font = "bold 21px 'Segoe UI', Arial, -apple-system, sans-serif";
           ctx.fillStyle = "#002244";
           ctx.fillText("Doctor Advice & Instructions:", 85, curY);
-          curY += 26;
+          curY += 30;
 
-          ctx.font = "normal 16px 'Segoe UI', Arial, -apple-system, sans-serif";
+          ctx.font = "normal 19px 'Segoe UI', Arial, -apple-system, sans-serif";
           ctx.fillStyle = "#1e293b";
           const paragraphs = data.advice.split("\n");
           for (const p of paragraphs) {
             if (!p.trim()) continue;
             const pClean = p.trim().startsWith("•") || p.trim().startsWith("-") ? p.trim() : `• ${p.trim()}`;
-            const wrappedP = wrapLines(pClean, 72);
+            const wrappedP = wrapLines(pClean, 62);
             wrappedP.forEach((wl, wIdx) => {
-              ctx.fillText(wl, wIdx === 0 ? 115 : 130, curY);
-              curY += 22;
+              ctx.fillText(wl, wIdx === 0 ? 120 : 138, curY);
+              curY += 26;
             });
-            curY += 4;
+            curY += 6;
           }
         }
 
         // Doctor Signature Block
-        ctx.font = "bold 20px 'Segoe UI', Arial, -apple-system, sans-serif";
+        ctx.font = "bold 23px 'Segoe UI', Arial, -apple-system, sans-serif";
         ctx.fillStyle = "#002244";
-        ctx.fillText(data.doctorName || "Dr. Suvarna Raju.P", 720, 1345);
+        ctx.fillText(data.doctorName || "Dr. Suvarna Raju.P", 720, 1342);
 
-        ctx.font = "normal 15px 'Segoe UI', Arial, -apple-system, sans-serif";
+        ctx.font = "normal 17px 'Segoe UI', Arial, -apple-system, sans-serif";
         ctx.fillStyle = "#64748b";
         ctx.fillText("Authorized Signature", 720, 1368);
 
