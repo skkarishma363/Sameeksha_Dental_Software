@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS public.patients (
     visit TEXT,
     medical_notes TEXT,
     balance TEXT DEFAULT '₹0',
-    status TEXT CHECK (status IN ('Active', 'Inactive')) DEFAULT 'Active',
+    status TEXT CHECK (status IN ('Active', 'Inactive', 'Archived')) DEFAULT 'Active',
     dental_chart JSONB DEFAULT '{}'::jsonb,
     prescriptions TEXT[] DEFAULT ARRAY[]::TEXT[],
     files JSONB DEFAULT '[]'::jsonb,

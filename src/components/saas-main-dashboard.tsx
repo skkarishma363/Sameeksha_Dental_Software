@@ -5282,7 +5282,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       // Evaluate duplicates if matches exist
       if (allMatches.length > 0) {
         // 1. Check if an archived patient matches
-        const archivedMatch = allMatches.find(m => m.status === "Archived");
+        const archivedMatch = allMatches.find(m => m.status === "Archived" || m.status === "Inactive");
         if (archivedMatch) {
           setDuplicateMatchInfo({
             isOpen: true,
@@ -5535,15 +5535,17 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     }
     setDeleteConfirmDialog(prev => ({ ...prev, actionInProgress: true }));
     try {
-      const targetId = pat.uuid || pat.id;
-      const { error } = await supabase
-        .from("patients")
-        .update({ status: "Archived" })
-        .or(`id.eq.${targetId},patient_id.eq.${pat.id}`);
+      let updateQuery = supabase.from("patients").update({ status: "Archived" });
+      if (pat.uuid) {
+        updateQuery = updateQuery.eq("id", pat.uuid);
+      } else {
+        updateQuery = updateQuery.eq("patient_id", pat.id);
+      }
+      const { error } = await updateQuery;
 
       if (error) {
         console.error("Failed to archive patient in database:", error.message);
-        showToast("Failed to archive patient in database.", "error");
+        showToast("Failed to archive patient: " + (error.message || "Database update failed"), "error");
         return;
       }
 
@@ -5569,11 +5571,13 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     }
     setDeleteConfirmDialog(prev => ({ ...prev, actionInProgress: true }));
     try {
-      const targetId = pat.uuid || pat.id;
-      const { error } = await supabase
-        .from("patients")
-        .delete()
-        .or(`id.eq.${targetId},patient_id.eq.${pat.id}`);
+      let delQuery = supabase.from("patients").delete();
+      if (pat.uuid) {
+        delQuery = delQuery.eq("id", pat.uuid);
+      } else {
+        delQuery = delQuery.eq("patient_id", pat.id);
+      }
+      const { error } = await delQuery;
 
       if (error) {
         console.error("Failed to delete patient from database:", error.message);
@@ -5600,11 +5604,13 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       showToast("Permission denied: Only practice owners can restore patients.", "error");
       return;
     }
-    const targetId = pat.uuid || pat.id;
-    const { error } = await supabase
-      .from("patients")
-      .update({ status: "Active" })
-      .or(`id.eq.${targetId},patient_id.eq.${pat.id}`);
+    let updateQuery = supabase.from("patients").update({ status: "Active" });
+    if (pat.uuid) {
+      updateQuery = updateQuery.eq("id", pat.uuid);
+    } else {
+      updateQuery = updateQuery.eq("patient_id", pat.id);
+    }
+    const { error } = await updateQuery;
 
     if (error) {
       console.error("Failed to restore patient:", error.message);
@@ -11249,14 +11255,14 @@ ${clinicName}`;
                     onClick={() => setPatientFilterStatus("Active")}
                     className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${patientFilterStatus === "Active" ? "bg-white dark:bg-slate-800 text-blue-600 shadow-xs font-bold" : "text-slate-500 hover:text-slate-800 dark:text-slate-400"}`}
                   >
-                    Active ({patients.filter(p => p.status !== "Archived").length})
+                    Active ({patients.filter(p => p.status !== "Archived" && p.status !== "Inactive").length})
                   </button>
                   <button
                     type="button"
                     onClick={() => setPatientFilterStatus("Archived")}
                     className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${patientFilterStatus === "Archived" ? "bg-white dark:bg-slate-800 text-amber-600 shadow-xs font-bold" : "text-slate-500 hover:text-slate-800 dark:text-slate-400"}`}
                   >
-                    Archived ({patients.filter(p => p.status === "Archived").length})
+                    Archived ({patients.filter(p => p.status === "Archived" || p.status === "Inactive").length})
                   </button>
                   <button
                     type="button"
@@ -11287,8 +11293,9 @@ ${clinicName}`;
               <tbody className="divide-y divide-slate-100 dark:divide-slate-900 text-slate-705">
                 {patients
                   .filter(pat => {
-                    if (patientFilterStatus === "Active" && pat.status === "Archived") return false;
-                    if (patientFilterStatus === "Archived" && pat.status !== "Archived") return false;
+                    const isArchived = pat.status === "Archived" || pat.status === "Inactive";
+                    if (patientFilterStatus === "Active" && isArchived) return false;
+                    if (patientFilterStatus === "Archived" && !isArchived) return false;
                     if (!patientsDirectoryQuery.trim()) return true;
                     const q = patientsDirectoryQuery.toLowerCase();
                     return pat.name.toLowerCase().includes(q) || pat.id.toLowerCase().includes(q) || pat.phone.includes(q);
@@ -11307,16 +11314,16 @@ ${clinicName}`;
                       <td className="py-3.5 px-3 whitespace-nowrap">
                         <span className={`px-2.5 py-0.5 rounded-full text-[12px] sm:text-[13px] font-medium inline-block ${
                           pat.status === "Active" ? "bg-emerald-50 text-emerald-700" :
-                          pat.status === "Archived" ? "bg-amber-50 text-amber-700 dark:bg-amber-955/30 dark:text-amber-300" :
+                          (pat.status === "Archived" || pat.status === "Inactive") ? "bg-amber-50 text-amber-700 dark:bg-amber-955/30 dark:text-amber-300" :
                           "bg-slate-100 text-slate-500"
-                        }`}>{pat.status}</span>
+                        }`}>{pat.status === "Inactive" ? "Archived" : pat.status}</span>
                       </td>
                       <td className="py-3.5 px-3 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-2">
                           <button onClick={() => setSelectedPatientId(pat.id)} className="text-blue-605 hover:underline text-[14px] sm:text-[15px] font-semibold cursor-pointer">
                             Open Profile
                           </button>
-                          {pat.status === "Archived" ? (
+                          {(pat.status === "Archived" || pat.status === "Inactive") ? (
                             <button
                               onClick={() => handleRestorePatient(pat)}
                               className="text-amber-600 hover:text-amber-700 hover:underline text-[12px] font-semibold cursor-pointer px-2 py-0.5 rounded border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-955/20"
@@ -17216,10 +17223,10 @@ ${clinicName}`;
                   <span className="text-slate-500 block text-[11px]">Status</span>
                   <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-bold ${
                     duplicateMatchInfo.matchingPatient.status === "Active" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-955/40 dark:text-emerald-300" :
-                    duplicateMatchInfo.matchingPatient.status === "Archived" ? "bg-amber-100 text-amber-800 dark:bg-amber-955/40 dark:text-amber-300" :
+                    (duplicateMatchInfo.matchingPatient.status === "Archived" || duplicateMatchInfo.matchingPatient.status === "Inactive") ? "bg-amber-100 text-amber-800 dark:bg-amber-955/40 dark:text-amber-300" :
                     "bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300"
                   }`}>
-                    {duplicateMatchInfo.matchingPatient.status}
+                    {duplicateMatchInfo.matchingPatient.status === "Inactive" ? "Archived" : duplicateMatchInfo.matchingPatient.status}
                   </span>
                 </div>
               </div>
