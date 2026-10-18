@@ -71,13 +71,16 @@ import {
   Package,
   Boxes,
   AlertTriangle,
-  ExternalLink
+  ExternalLink,
+  Eye
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DentalLogo } from "@/components/dental-logo";
 import { OfficialSameekshaCaseSheet } from "@/components/OfficialSameekshaCaseSheet";
+import { OfficialSameekshaPrescription } from "@/components/OfficialSameekshaPrescription";
+import { downloadSameekshaPrescriptionPDF } from "@/lib/prescriptionPdfGenerator";
 import { createClient } from "@/lib/supabase/client";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -1738,6 +1741,19 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     stockUnit: string;
     availableStock: number | null;
   } | null>(null);
+
+  // Authentic Sameeksha Prescription Preview & Download State
+  const [prescriptionPreviewModal, setPrescriptionPreviewModal] = useState<{
+    isOpen: boolean;
+    patient: any;
+    medicines: any[];
+    dateStr?: string;
+    diagnosis?: string;
+    advice?: string;
+    doctorName?: string;
+  } | null>(null);
+  const [prescOverflowWarning, setPrescOverflowWarning] = useState(false);
+  const [isGeneratingPrescPdf, setIsGeneratingPrescPdf] = useState(false);
 
   // Global Dialog triggers
   const [quickAddOpen, setQuickAddOpen] = useState(false);
@@ -3815,6 +3831,64 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     }
 
     window.print();
+  };
+
+  const handlePreviewPrescription = () => {
+    const patientItem = patients.find(p => p.id === selectedPatientId);
+    if (!patientItem) {
+      showToast("Please select a patient before previewing a prescription.", "error");
+      return;
+    }
+
+    if (prescMeds.length === 0 || prescMeds.some(m => !m.name.trim())) {
+      showToast("All medicines must have a name.", "error");
+      return;
+    }
+
+    setPrescriptionPreviewModal({
+      isOpen: true,
+      patient: patientItem,
+      medicines: prescMeds,
+      dateStr: prescDate || new Date().toISOString().split("T")[0],
+      diagnosis: prescDiagnosis,
+      advice: prescAdvice,
+      doctorName: prescDoctor || "Dr. Suvarna Raju.P"
+    });
+  };
+
+  const handleDownloadPrescriptionPDF = async (customPresc?: any) => {
+    const patientItem = customPresc?.patient || patients.find(p => p.id === selectedPatientId);
+    if (!patientItem) {
+      showToast("Please select a patient before downloading prescription.", "error");
+      return;
+    }
+    const meds = customPresc?.medicines || prescMeds;
+    if (!customPresc && (meds.length === 0 || meds.some((m: any) => !m.name?.trim()))) {
+      showToast("All medicines must have a name.", "error");
+      return;
+    }
+
+    try {
+      setIsGeneratingPrescPdf(true);
+      const res = await downloadSameekshaPrescriptionPDF({
+        patient: patientItem,
+        medicines: meds,
+        dateStr: customPresc?.dateStr || prescDate || new Date().toISOString().split("T")[0],
+        diagnosis: customPresc?.diagnosis || prescDiagnosis,
+        advice: customPresc?.advice || prescAdvice,
+        doctorName: customPresc?.doctorName || prescDoctor || "Dr. Suvarna Raju.P"
+      });
+      if (res.isOverflow) {
+        showToast("Note: Prescription entries exceed single-page writing area on the official pad.", "error");
+      } else {
+        showToast("Prescription PDF downloaded successfully.", "success");
+      }
+    } catch (err: any) {
+      console.error("PDF generation failed:", err);
+      showToast("Failed to generate prescription PDF: " + (err.message || err), "error");
+    } finally {
+      setIsGeneratingPrescPdf(false);
+    }
   };
 
   const handleSaveClinicalNote = async (e: React.FormEvent) => {
@@ -10113,11 +10187,30 @@ ${clinicName}`;
                     <Input value={prescAdvice} onChange={e => setPrescAdvice(e.target.value)} placeholder="Follow-up warnings..." />
                   </div>
 
-                  <div className="flex gap-3 justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <div className="flex flex-wrap gap-2.5 justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+                    <Button
+                      type="button"
+                      onClick={handlePreviewPrescription}
+                      className="h-9 px-3.5 rounded border border-blue-600 bg-white text-blue-700 hover:bg-blue-50 dark:bg-slate-900 dark:text-blue-400 dark:border-blue-500 dark:hover:bg-blue-950/40 font-semibold transition-colors duration-200 flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      title="Preview on authentic Sameeksha Hospital prescription pad"
+                    >
+                      <Eye className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                      Preview Pad
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => handleDownloadPrescriptionPDF()}
+                      disabled={isGeneratingPrescPdf}
+                      className="h-9 px-3.5 rounded border border-emerald-600 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition-colors duration-200 flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      title="Download official Sameeksha prescription PDF"
+                    >
+                      <Download className="h-4 w-4 text-white" />
+                      {isGeneratingPrescPdf ? "Generating..." : "Download PDF"}
+                    </Button>
                     <Button
                       type="button"
                       onClick={handlePrintPrescription}
-                      className="h-9 px-4 rounded border border-slate-900 bg-slate-900 text-white hover:bg-[#333333] hover:text-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:text-white active:bg-black active:text-white dark:bg-slate-900 dark:text-white dark:hover:bg-[#333333] dark:hover:text-white font-semibold transition-colors duration-200 flex items-center gap-2 cursor-pointer shadow-xs"
+                      className="h-9 px-3.5 rounded border border-slate-900 bg-slate-900 text-white hover:bg-[#333333] hover:text-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:text-white active:bg-black active:text-white dark:bg-slate-900 dark:text-white dark:hover:bg-[#333333] dark:hover:text-white font-semibold transition-colors duration-200 flex items-center gap-1.5 cursor-pointer shadow-xs"
                     >
                       <Printer className="h-4 w-4 text-white" />
                       Print Prescription
@@ -10285,6 +10378,39 @@ ${clinicName}`;
                             )}
 
                             <button
+                              type="button"
+                              onClick={() => {
+                                setPrescriptionPreviewModal({
+                                  isOpen: true,
+                                  patient: patientItem,
+                                  medicines: [pr],
+                                  dateStr: patientItem.visit || patientItem.firstVisit || new Date().toISOString().split("T")[0],
+                                  doctorName: prescDoctor || "Dr. Suvarna Raju.P"
+                                });
+                              }}
+                              className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
+                              title="View on authentic Sameeksha Prescription Pad"
+                            >
+                              <Eye className="h-3 w-3 text-blue-600 dark:text-blue-400" /> Pad
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleDownloadPrescriptionPDF({
+                                  patient: patientItem,
+                                  medicines: [pr],
+                                  dateStr: patientItem.visit || patientItem.firstVisit || new Date().toISOString().split("T")[0],
+                                  doctorName: prescDoctor || "Dr. Suvarna Raju.P"
+                                });
+                              }}
+                              className="px-2.5 py-1 rounded-lg border border-emerald-600 hover:bg-emerald-50 text-emerald-700 font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
+                              title="Download official Sameeksha Prescription PDF"
+                            >
+                              <Download className="h-3 w-3" /> PDF
+                            </button>
+
+                            <button
                               onClick={() => {
                                 setPatients(prev => prev.map(p => p.id === selectedPatientId ? { ...p, prescriptions: p.prescriptions.filter((_, i) => i !== idx) } : p));
                                 showToast("Prescription deleted.", "success");
@@ -10302,141 +10428,17 @@ ${clinicName}`;
                   )}
                 </div>
 
-                {/* Printable Prescription Document Layout (Visible ONLY during print) */}
+                {/* AUTHENTIC SAMEEKSHA HOSPITAL PRESCRIPTION PRINT TEMPLATE */}
                 {selectedPatientId && (
-                  <div id="print-area" className="hidden print:block bg-white text-slate-900 p-8 max-w-[210mm] mx-auto text-xs space-y-6 font-sans">
-                    {/* Clinic Header */}
-                    <div className="border-b-2 border-slate-800 pb-4 mb-4 flex justify-between items-start print:break-inside-avoid">
-                      <div className="space-y-1">
-                        <h1 className="text-xl font-bold text-blue-900 tracking-tight">{clinicName || "Sameeksha Super Speciality Dental Hospital"}</h1>
-                        <p className="text-xs text-slate-600 font-medium">CHOWDARY GUEST HOUSE, GROUND FLOOR, NEAR RTC COLONY 4 ROAD JUNCTION, Ramanayapeta, Andhra Pradesh 533005</p>
-                        <p className="text-xs text-slate-800 font-bold">PH: 088859 99857</p>
-                      </div>
-                      <div className="text-right space-y-1">
-                        <span className="text-lg font-black text-blue-900 uppercase tracking-wider block">PRESCRIPTION</span>
-                        <p className="text-xs text-slate-600 font-medium">Date: {prescDate || new Date().toISOString().split("T")[0]}</p>
-                      </div>
-                    </div>
-
-                    {/* Patient & Doctor Details Card */}
-                    {(() => {
-                      const pItem = patients.find(p => p.id === selectedPatientId);
-                      if (!pItem) return null;
-                      const ageGender = `${pItem.age || ""} ${pItem.gender || ""}`.trim();
-                      const docName = prescDoctor || (doctors[0]?.name || "Dr. Durga Praveen");
-                      const medNotes = pItem.medicalNotes || (pItem as any).medicalConditions || "None";
-
-                      return (
-                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 grid grid-cols-2 gap-x-6 gap-y-2 text-xs print:break-inside-avoid">
-                          <div>
-                            <span className="font-bold text-slate-700">Patient Name: </span>
-                            <span className="font-semibold text-slate-900">{pItem.name}</span>
-                          </div>
-                          <div>
-                            <span className="font-bold text-slate-700">Doctor: </span>
-                            <span className="font-semibold text-slate-900">{docName}</span>
-                          </div>
-                          <div>
-                            <span className="font-bold text-slate-700">Patient ID: </span>
-                            <span className="font-semibold text-slate-900">{pItem.id}</span>
-                          </div>
-                          <div>
-                            <span className="font-bold text-slate-700">Prescription Date: </span>
-                            <span className="font-semibold text-slate-900">{prescDate || new Date().toISOString().split("T")[0]}</span>
-                          </div>
-                          {ageGender && (
-                            <div>
-                              <span className="font-bold text-slate-700">Age / Gender: </span>
-                              <span className="font-semibold text-slate-900">{ageGender}</span>
-                            </div>
-                          )}
-                          {pItem.phone && (
-                            <div>
-                              <span className="font-bold text-slate-700">Contact: </span>
-                              <span className="font-semibold text-slate-900">{pItem.phone}</span>
-                            </div>
-                          )}
-                          {medNotes && medNotes !== "None" && (
-                            <div className="col-span-2 mt-1 pt-1 border-t border-slate-200">
-                              <span className="font-bold text-red-700">Medical Notes / Allergies: </span>
-                              <span className="font-semibold text-slate-900">{medNotes}</span>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-
-                    {/* Diagnosis Notes */}
-                    {prescDiagnosis.trim() && (
-                      <div className="space-y-1.5 print:break-inside-avoid">
-                        <h3 className="font-bold text-sm text-blue-900 uppercase tracking-wide border-b border-slate-200 pb-1">Diagnosis / Clinical Notes</h3>
-                        <p className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed pl-1">{prescDiagnosis.trim()}</p>
-                      </div>
-                    )}
-
-                    {/* Medicines Prescribed Table */}
-                    {prescMeds.length > 0 && (
-                      <div className="space-y-2 print:break-inside-avoid">
-                        <h3 className="font-bold text-sm text-blue-900 uppercase tracking-wide border-b border-slate-200 pb-1">Medicines Prescribed</h3>
-                        <table className="w-full border-collapse border border-slate-300 text-xs">
-                          <thead>
-                            <tr className="bg-blue-900 text-white">
-                              <th className="border border-slate-300 px-2.5 py-1.5 text-center w-8">#</th>
-                              <th className="border border-slate-300 px-3 py-1.5 text-left font-bold">Medicine Name</th>
-                              <th className="border border-slate-300 px-3 py-1.5 text-left">Dosage / Frequency</th>
-                              <th className="border border-slate-300 px-3 py-1.5 text-left">Meal Timing</th>
-                              <th className="border border-slate-300 px-3 py-1.5 text-left">Duration</th>
-                              <th className="border border-slate-300 px-3 py-1.5 text-left">Special Instructions</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {prescMeds.map((med, idx) => {
-                              const parsed = parseDosageString(med.dosage);
-                              const times: string[] = [];
-                              if (parsed.morning) times.push("Morning");
-                              if (parsed.afternoon) times.push("Afternoon");
-                              if (parsed.night) times.push("Night");
-
-                              const timeStr = times.join(", ") || "-";
-                              let mealStr = "-";
-                              if (parsed.beforeMeals) mealStr = "Before Meals";
-                              else if (parsed.afterMeals) mealStr = "After Meals";
-
-                              return (
-                                <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-slate-50/80"} style={{ pageBreakInside: "avoid" }}>
-                                  <td className="border border-slate-300 px-2.5 py-2 text-center font-medium">{idx + 1}</td>
-                                  <td className="border border-slate-300 px-3 py-2 font-bold text-slate-900">{med.name.trim() || "-"}</td>
-                                  <td className="border border-slate-300 px-3 py-2 text-slate-800">{timeStr}</td>
-                                  <td className="border border-slate-300 px-3 py-2 text-slate-800">{mealStr}</td>
-                                  <td className="border border-slate-300 px-3 py-2 text-slate-800">{med.duration.trim() || "-"}</td>
-                                  <td className="border border-slate-300 px-3 py-2 text-slate-800">{med.instructions.trim() || "-"}</td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-
-                    {/* Doctor Advice / Instructions */}
-                    {prescAdvice.trim() && (
-                      <div className="space-y-1.5 print:break-inside-avoid">
-                        <h3 className="font-bold text-sm text-blue-900 uppercase tracking-wide border-b border-slate-200 pb-1">Doctor Advice / Instructions</h3>
-                        <p className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed pl-1">{prescAdvice.trim()}</p>
-                      </div>
-                    )}
-
-                    {/* Doctor Signature Block */}
-                    <div className="pt-8 flex justify-end print:break-inside-avoid">
-                      <div className="text-right space-y-6">
-                        <p className="text-xs font-bold text-slate-900">
-                          Doctor: {prescDoctor || (doctors[0]?.name || "Dr. Durga Praveen")}
-                        </p>
-                        <p className="text-xs text-slate-700">
-                          Signature: __________________________
-                        </p>
-                      </div>
-                    </div>
+                  <div id="print-area" className="hidden print:block w-full">
+                    <OfficialSameekshaPrescription
+                      patient={patientItem}
+                      medicines={prescriptionPreviewModal?.medicines || prescMeds}
+                      dateStr={prescriptionPreviewModal?.dateStr || prescDate || patientItem.visit || patientItem.firstVisit}
+                      diagnosis={prescriptionPreviewModal?.diagnosis || prescDiagnosis}
+                      advice={prescriptionPreviewModal?.advice || prescAdvice}
+                      doctorName={prescriptionPreviewModal?.doctorName || prescDoctor || "Dr. Suvarna Raju.P"}
+                    />
                   </div>
                 )}
               </div>
@@ -16951,6 +16953,81 @@ ${clinicName}`;
               >
                 Dispense Medicine
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AUTHENTIC SAMEEKSHA HOSPITAL PRESCRIPTION PREVIEW MODAL */}
+      {prescriptionPreviewModal?.isOpen && (
+        <div className="fixed inset-0 z-[10002] flex items-center justify-center p-3 sm:p-6 bg-black/75 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[95vh] flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800">
+            {/* Modal Header */}
+            <div className="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-950 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="h-8 w-8 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 flex items-center justify-center font-black text-sm">
+                  Rx
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white leading-tight">
+                    Sameeksha Super Speciality Dental Hospital
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Prescription Pad — Patient: <strong className="text-slate-800 dark:text-slate-200">{prescriptionPreviewModal.patient?.name}</strong> (ID: {prescriptionPreviewModal.patient?.id})
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  onClick={() => handleDownloadPrescriptionPDF(prescriptionPreviewModal)}
+                  disabled={isGeneratingPrescPdf}
+                  className="h-8 px-3 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {isGeneratingPrescPdf ? "Generating..." : "Download PDF"}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="h-8 px-3 rounded bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  Print
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setPrescriptionPreviewModal(null)}
+                  className="h-8 w-8 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                  title="Close preview"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Overflow warning banner if present */}
+            {prescOverflowWarning && (
+              <div className="bg-amber-50 border-b border-amber-200 px-5 py-2 text-xs text-amber-800 flex items-center gap-2 shrink-0">
+                <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+                <span><strong>Prescription Overflow:</strong> The prescribed entries exceed the single-page writing area on the official prescription pad. Consider shortening instructions or dividing into separate visits.</span>
+              </div>
+            )}
+
+            {/* Modal Body: Authentic Prescription Pad */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-100 dark:bg-slate-950/60 flex justify-center items-start">
+              <div className="w-full max-w-[210mm] bg-white rounded-lg shadow-xl overflow-hidden border border-slate-300">
+                <OfficialSameekshaPrescription
+                  patient={prescriptionPreviewModal.patient}
+                  medicines={prescriptionPreviewModal.medicines}
+                  dateStr={prescriptionPreviewModal.dateStr}
+                  diagnosis={prescriptionPreviewModal.diagnosis}
+                  advice={prescriptionPreviewModal.advice}
+                  doctorName={prescriptionPreviewModal.doctorName}
+                  onOverflow={(isOv) => setPrescOverflowWarning(isOv)}
+                />
+              </div>
             </div>
           </div>
         </div>
