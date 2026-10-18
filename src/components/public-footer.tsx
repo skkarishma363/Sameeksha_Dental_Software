@@ -22,11 +22,47 @@ export function PublicFooter() {
           <div className="space-y-3">
             <h4 className="text-xs font-bold text-white uppercase tracking-wider">Quick Links</h4>
             <ul className="space-y-2 text-xs">
-              <li><Link href="/" className="hover:text-blue-400 transition-colors">Home</Link></li>
-              <li><Link href="/services" className="hover:text-blue-400 transition-colors">Services & Procedures</Link></li>
-              <li><Link href="/about" className="hover:text-blue-400 transition-colors">About Our Clinic</Link></li>
+              <li>
+                <a
+                  href="https://jabeershaik786.github.io/Sameeksha-Superspeciality-Dental-Hospital-Implant-Center/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-blue-400 transition-colors"
+                >
+                  Official Hospital Website
+                </a>
+              </li>
+              <li>
+                <a
+                  href="https://jabeershaik786.github.io/Sameeksha-Superspeciality-Dental-Hospital-Implant-Center/#services"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-blue-400 transition-colors"
+                >
+                  Services & Procedures
+                </a>
+              </li>
+              <li>
+                <a
+                  href="https://jabeershaik786.github.io/Sameeksha-Superspeciality-Dental-Hospital-Implant-Center/#about"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-blue-400 transition-colors"
+                >
+                  About Our Hospital
+                </a>
+              </li>
               <li><Link href="/book-appointment" className="hover:text-blue-400 transition-colors">Book Appointment</Link></li>
-              <li><Link href="/contact" className="hover:text-blue-400 transition-colors">Contact Us</Link></li>
+              <li>
+                <a
+                  href="https://jabeershaik786.github.io/Sameeksha-Superspeciality-Dental-Hospital-Implant-Center/#contact"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-blue-400 transition-colors"
+                >
+                  Contact Hospital
+                </a>
+              </li>
             </ul>
           </div>
 

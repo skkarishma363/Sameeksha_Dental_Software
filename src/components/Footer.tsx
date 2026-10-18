@@ -192,8 +192,13 @@ export default function Footer() {
           <Link href="/terms-of-service" className="hover:text-white transition-colors duration-200 py-1">
             Terms of Service
           </Link>
-          <a href="#" className="hover:text-white transition-colors duration-200 py-1">
-            Sitemap
+          <a
+            href="https://jabeershaik786.github.io/Sameeksha-Superspeciality-Dental-Hospital-Implant-Center/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-white transition-colors duration-200 py-1"
+          >
+            Hospital Website
           </a>
           <Link
             href="/login"

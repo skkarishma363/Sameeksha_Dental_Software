@@ -22,11 +22,11 @@ export function PublicHeader() {
   }, []);
 
   const navLinks = [
-    { name: "Home", href: "/" },
-    { name: "Services", href: "/services" },
-    { name: "About Us", href: "/about" },
-    { name: "Contact", href: "/contact" },
-    { name: "Book Appointment", href: "/book-appointment" },
+    { name: "Hospital Website", href: "https://jabeershaik786.github.io/Sameeksha-Superspeciality-Dental-Hospital-Implant-Center/", isExternal: true },
+    { name: "Services", href: "https://jabeershaik786.github.io/Sameeksha-Superspeciality-Dental-Hospital-Implant-Center/#services", isExternal: true },
+    { name: "About Us", href: "https://jabeershaik786.github.io/Sameeksha-Superspeciality-Dental-Hospital-Implant-Center/#about", isExternal: true },
+    { name: "Contact", href: "https://jabeershaik786.github.io/Sameeksha-Superspeciality-Dental-Hospital-Implant-Center/#contact", isExternal: true },
+    { name: "Book Appointment", href: "/book-appointment", isExternal: false },
   ];
 
   return (
@@ -38,10 +38,23 @@ export function PublicHeader() {
           </Link>
           <nav className="hidden md:flex items-center gap-6">
             {navLinks.map((link) => {
-              const isActive = pathname === link.href;
+              const isActive = !link.isExternal && pathname === link.href;
+              if (link.isExternal) {
+                return (
+                  <a
+                    key={link.name}
+                    href={link.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-semibold transition-colors hover:text-blue-600 dark:hover:text-blue-400 text-slate-600 dark:text-slate-300"
+                  >
+                    {link.name}
+                  </a>
+                );
+              }
               return (
                 <Link
-                  key={link.href}
+                  key={link.name}
                   href={link.href}
                   className={`text-xs font-semibold transition-colors hover:text-blue-600 dark:hover:text-blue-400 ${
                     isActive
@@ -96,10 +109,24 @@ export function PublicHeader() {
       {mobileMenuOpen && (
         <div className="md:hidden border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-4 space-y-3">
           {navLinks.map((link) => {
-            const isActive = pathname === link.href;
+            const isActive = !link.isExternal && pathname === link.href;
+            if (link.isExternal) {
+              return (
+                <a
+                  key={link.name}
+                  href={link.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="block text-sm font-medium py-1.5 text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400"
+                >
+                  {link.name}
+                </a>
+              );
+            }
             return (
               <Link
-                key={link.href}
+                key={link.name}
                 href={link.href}
                 onClick={() => setMobileMenuOpen(false)}
                 className={`block text-sm font-medium py-1.5 ${

@@ -70,7 +70,9 @@ import {
   Pill,
   Package,
   Boxes,
-  AlertTriangle
+  AlertTriangle,
+  Globe,
+  ExternalLink
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -2776,6 +2778,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
   const [clinicName, setClinicName] = useState("Apex Dental Clinic");
   const [receptionistUser, setReceptionistUser] = useState("Anjali");
   const [clinicAddress, setClinicAddress] = useState("12, MG Road, Bengaluru");
+  const [clinicWebsite, setClinicWebsite] = useState("https://jabeershaik786.github.io/Sameeksha-Superspeciality-Dental-Hospital-Implant-Center/");
 
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [backupHistory, setBackupHistory] = useState<BackupHistoryItem[]>([]);
@@ -2839,6 +2842,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         if (parsed.clinicName) setClinicName(parsed.clinicName);
         if (parsed.receptionistUser) setReceptionistUser(parsed.receptionistUser);
         if (parsed.clinicAddress) setClinicAddress(parsed.clinicAddress);
+        if (parsed.clinicWebsite) setClinicWebsite(parsed.clinicWebsite);
       }
     } catch (e) {}
   }, []);
@@ -8148,29 +8152,10 @@ ${clinicName}`;
                   </div>
                 </div>
 
-                {/* Digital Dental Case Sheet Container */}
-                <div id="print-area" className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-7 shadow-xs space-y-6 print:space-y-3 print:p-2 print:border-none print:shadow-none text-xs animate-fadeIn">
-                  {/* PRINT-ONLY CLINIC HEADER */}
-                  <div className="hidden print:block border-b-2 border-slate-800 pb-3 mb-3">
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-3">
-                        <DentalLogo showText={false} iconClassName="h-10 w-10" />
-                        <div>
-                          <h1 className="text-xl font-bold text-slate-900 tracking-tight">{clinicName || "VR Dental Clinic"}</h1>
-                          <p className="text-xs font-semibold text-slate-600">Dental Clinic / Comprehensive Dental Care</p>
-                          <p className="text-[11px] text-slate-500 font-medium">Phone: +91 98853 49798</p>
-                        </div>
-                      </div>
-                      <div className="text-right space-y-0.5">
-                        <span className="text-sm font-extrabold text-blue-700 block tracking-wider uppercase">DENTAL CASE SHEET</span>
-                        <p className="text-xs font-bold text-slate-800">ID: {patientItem.id}</p>
-                        <p className="text-xs text-slate-600">Date: {patientItem.visit || patientItem.firstVisit || new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</p>
-                      </div>
-                    </div>
-                  </div>
-
+                {/* Digital Dental Case Sheet Container (Screen Display Only) */}
+                <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-7 shadow-xs space-y-6 text-xs animate-fadeIn print:hidden">
                   {/* Top Header Row with Date (Screen Only) */}
-                  <div className="flex justify-between items-center border-b border-slate-200 dark:border-slate-800 pb-3 print:hidden">
+                  <div className="flex justify-between items-center border-b border-slate-200 dark:border-slate-800 pb-3">
                     <div className="flex items-center gap-2">
                       <FileText className="h-5 w-5 text-blue-600" />
                       <span className="font-bold text-sm tracking-wide text-slate-900 dark:text-white uppercase">DENTAL CASE SHEET</span>
@@ -8968,6 +8953,220 @@ ${clinicName}`;
                     </div>
                   </div>
                 </div>
+
+                {/* PHYSICAL PAPER CASE SHEET PRINT-ONLY TEMPLATE */}
+                {(() => {
+                  const rawIdDigits = String(patientItem.id || (patientItem as any).patient_id || "").replace(/\D/g, "");
+                  const paddedDigits = rawIdDigits ? rawIdDigits.padStart(6, " ").slice(-6) : "";
+                  const opDigits = Array.from({ length: 6 }, (_, i) => paddedDigits[i] || "");
+
+                  const medConditionsList = [
+                    { key: "Diabetes", eng: "Diabetes", tel: "చక్కెర వ్యాధి" },
+                    { key: "B.P.", eng: "B.P.", tel: "బి.పి." },
+                    { key: "Heart Complaint", eng: "Heart Complaint", tel: "గుండె వ్యాధులు" },
+                    { key: "Allergies", eng: "Allergies", tel: "అలర్జీ" },
+                    { key: "Bleeding Disorders", eng: "Bleeding Disorders", tel: "బ్లీడింగ్ సమస్యలు" },
+                    { key: "Pregnancy", eng: "Pregnancy", tel: "గర్భిణీ" },
+                    { key: "Thyroid", eng: "Thyroid", tel: "థైరాయిడ్" },
+                    { key: "Others", eng: "Others", tel: "ఇతరములు" },
+                  ];
+
+                  const treatmentAdvisedText = formatTreatmentAdvisedFromChart(patientItem.dentalChart) || editTreatmentAdvised || "";
+
+                  return (
+                    <div id="print-area" className="hidden print:block w-full max-w-[210mm] mx-auto bg-white text-slate-900 p-2 font-sans text-xs">
+                      <div className="border-4 border-double border-[#003366] p-3.5 flex flex-col justify-between min-h-[272mm] space-y-3">
+                        {/* HEADER SECTION */}
+                        <div className="flex justify-between items-start border-b border-slate-300 pb-2">
+                          {/* LEFT HEADER: LOGO + HOSPITAL NAME */}
+                          <div className="flex items-center gap-3">
+                            <DentalLogo showText={false} iconClassName="h-14 w-14" />
+                            <div className="space-y-0.5">
+                              <h1 className="text-xl font-black text-[#003366] tracking-tight uppercase leading-none">
+                                SAMEEKSHA MULTI SPECIALITY
+                              </h1>
+                              <p className="text-base font-bold text-[#003366] leading-tight">
+                                సమీక్షా మల్టీ స్పెషాలిటీ
+                              </p>
+                              <p className="text-xs font-bold text-[#003366] tracking-wide">
+                                DENTAL HOSPITAL &nbsp; <span className="font-semibold text-[11px]">డెంటల్ హాస్పిటల్</span>
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* RIGHT HEADER: DOCTOR & OP DETAILS */}
+                          <div className="text-right space-y-0.5">
+                            <p className="text-sm font-bold text-slate-900 leading-tight">
+                              Dr. P. Suvarna Raju, <span className="text-xs font-normal">B.D.S., FAGE (Manipal)</span>
+                            </p>
+                            <p className="text-xs font-semibold text-slate-700 italic">
+                              Cosmatic Dental Surgeon
+                            </p>
+                            <div className="flex items-center justify-end gap-1.5 pt-1">
+                              <span className="text-xs font-bold text-slate-900">O.P. No. :</span>
+                              <div className="flex gap-1">
+                                {opDigits.map((digit, idx) => (
+                                  <span key={idx} className="w-5 h-5 border border-slate-800 flex items-center justify-center font-mono font-bold text-xs bg-white">
+                                    {digit.trim() || ""}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-end gap-1 pt-0.5">
+                              <span className="text-xs font-bold text-slate-900">Date :</span>
+                              <span className="font-bold text-xs border-b border-slate-700 min-w-[110px] text-center">
+                                {patientItem.visit || patientItem.firstVisit || new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* SECTION 1: CONTACT INFORMATION */}
+                        <div className="space-y-1">
+                          <div className="bg-[#003366] text-white text-center py-1 font-extrabold text-xs tracking-wider uppercase">
+                            CONTACT INFORMATION
+                          </div>
+                          <div className="border border-[#003366] p-2.5 text-xs space-y-2">
+                            <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+                              <div className="flex items-baseline gap-1">
+                                <span className="font-bold text-slate-900 whitespace-nowrap">Name / పేరు :</span>
+                                <span className="font-bold text-slate-900 border-b border-dotted border-slate-600 flex-1 px-1">
+                                  {patientItem.name || ""}
+                                </span>
+                              </div>
+
+                              <div className="flex items-baseline gap-1">
+                                <span className="font-bold text-slate-900 whitespace-nowrap">Ref / రెఫర్ చేసినవారు :</span>
+                                <span className="font-bold text-slate-900 border-b border-dotted border-slate-600 flex-1 px-1">
+                                  {editRefDoctor || ""}
+                                </span>
+                              </div>
+
+                              <div className="flex items-baseline gap-1">
+                                <span className="font-bold text-slate-900 whitespace-nowrap">Age / వయస్సు :</span>
+                                <span className="font-bold text-slate-900 border-b border-dotted border-slate-600 flex-1 px-1">
+                                  {patientItem.age ? `${patientItem.age} Yrs` : ""}
+                                </span>
+                              </div>
+
+                              <div className="flex items-baseline gap-1">
+                                <span className="font-bold text-slate-900 whitespace-nowrap">Male / Female (మగ / ఆడ) :</span>
+                                <span className="font-bold text-slate-900 border-b border-dotted border-slate-600 flex-1 px-1">
+                                  {patientItem.gender || ""}
+                                </span>
+                              </div>
+
+                              <div className="flex items-baseline gap-1 col-span-2">
+                                <span className="font-bold text-slate-900 whitespace-nowrap">Tel No. / ఫోన్ నెం. :</span>
+                                <span className="font-bold text-slate-900 border-b border-dotted border-slate-600 flex-1 px-1">
+                                  {patientItem.phone || ""}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* SECTION 2: MEDICAL HISTORY */}
+                        <div className="space-y-1">
+                          <div className="bg-[#003366] text-white text-center py-1 font-extrabold text-xs tracking-wider uppercase">
+                            MEDICAL HISTORY
+                          </div>
+                          <div className="border border-[#003366] p-2.5 text-xs space-y-2">
+                            <div className="grid grid-cols-4 gap-2">
+                              {medConditionsList.map((cond) => {
+                                const isChecked = editMedicalHistoryConditions.includes(cond.key);
+                                return (
+                                  <div key={cond.key} className="flex items-center gap-1.5 text-[11px]">
+                                    <div className="w-3.5 h-3.5 border border-slate-800 flex items-center justify-center font-bold text-xs shrink-0 bg-white">
+                                      {isChecked ? "✓" : ""}
+                                    </div>
+                                    <span className="font-semibold text-slate-900">
+                                      {cond.eng} / <span className="font-normal text-slate-800">{cond.tel}</span>
+                                      {cond.key === "Others" && editMedicalHistoryOthers ? ` (${editMedicalHistoryOthers})` : ""}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            <div className="flex items-baseline gap-1 pt-1.5 border-t border-slate-200 text-xs">
+                              <span className="font-bold text-slate-900 whitespace-nowrap">Medications if any :</span>
+                              <span className="font-semibold text-slate-900 border-b border-dotted border-slate-600 flex-1 px-1">
+                                {editCurrentMedications || ""}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* SECTION 3: CLINICAL CASE DETAILS */}
+                        <div className="border border-[#003366] flex-1 flex flex-col min-h-[380px] text-xs">
+                          {/* Chief Complaint & Past Dental History */}
+                          <div className="border-b border-[#003366] flex flex-1 min-h-[90px]">
+                            <div className="flex-1 p-2 space-y-1">
+                              <h4 className="font-extrabold text-[#003366] uppercase tracking-wide text-xs">
+                                Chief Complaint & Past Dental History
+                              </h4>
+                              <div className="text-slate-900 whitespace-pre-wrap leading-relaxed font-medium pl-1">
+                                {editChiefComplaint || ""}
+                              </div>
+                            </div>
+                            {/* Double vertical column margin lines on right side */}
+                            <div className="w-14 border-l border-slate-400 flex justify-end border-r border-slate-300"></div>
+                          </div>
+
+                          {/* Intra Oral Examination */}
+                          <div className="border-b border-[#003366] flex flex-1 min-h-[90px]">
+                            <div className="flex-1 p-2 space-y-1">
+                              <h4 className="font-extrabold text-[#003366] uppercase tracking-wide text-xs">
+                                Intra Oral Examination
+                              </h4>
+                              <div className="text-slate-900 whitespace-pre-wrap leading-relaxed font-medium pl-1">
+                                {editIntraOralExam || ""}
+                              </div>
+                            </div>
+                            <div className="w-14 border-l border-slate-400 flex justify-end border-r border-slate-300"></div>
+                          </div>
+
+                          {/* Provisional Diagnosis */}
+                          <div className="border-b border-[#003366] flex flex-1 min-h-[90px]">
+                            <div className="flex-1 p-2 space-y-1">
+                              <h4 className="font-extrabold text-[#003366] uppercase tracking-wide text-xs">
+                                Provisional Diagnosis
+                              </h4>
+                              <div className="text-slate-900 whitespace-pre-wrap leading-relaxed font-medium pl-1">
+                                {editProvisionalDiagnosis || ""}
+                              </div>
+                            </div>
+                            <div className="w-14 border-l border-slate-400 flex justify-end border-r border-slate-300"></div>
+                          </div>
+
+                          {/* Treatment Advised */}
+                          <div className="flex flex-1 min-h-[90px]">
+                            <div className="flex-1 p-2 space-y-1">
+                              <h4 className="font-extrabold text-[#003366] uppercase tracking-wide text-xs">
+                                Treatment Advised
+                              </h4>
+                              <div className="text-slate-900 whitespace-pre-wrap leading-relaxed font-medium pl-1">
+                                {treatmentAdvisedText}
+                              </div>
+                            </div>
+                            <div className="w-14 border-l border-slate-400 flex justify-end border-r border-slate-300"></div>
+                          </div>
+                        </div>
+
+                        {/* SECTION 4: CONSENT & SIGNATURE */}
+                        <div className="pt-2 space-y-2">
+                          <p className="text-[10px] leading-tight text-slate-800 font-medium text-justify">
+                            <span className="font-bold text-slate-900">Consent :</span> I willingly consent to subject myself to the performance of any procedure deemed appropriate by the dental surgeon during the course of my treatment. The risks and possible consequences have been explained to me in my own language and I understood the same.
+                          </p>
+                          <div className="flex justify-end pt-3 pr-4">
+                            <span className="font-bold text-xs italic text-slate-900">Signature</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -12679,7 +12878,8 @@ ${clinicName}`;
         const settingsObj = {
           clinicName: clinicName.trim(),
           receptionistUser: receptionistUser.trim(),
-          clinicAddress: clinicAddress.trim()
+          clinicAddress: clinicAddress.trim(),
+          clinicWebsite: clinicWebsite.trim()
         };
         localStorage.setItem("clinic_settings", JSON.stringify(settingsObj));
         showToast("Clinic configurations saved.", "success");
@@ -13087,6 +13287,28 @@ ${clinicName}`;
                       value={clinicAddress}
                       onChange={(e) => setClinicAddress(e.target.value)}
                       className="h-10 rounded-xl border-slate-200 dark:border-slate-800 text-[14px]"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[13px] font-medium text-slate-700 dark:text-slate-300">Hospital Website URL</Label>
+                      <a
+                        href={clinicWebsite}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 hover:underline"
+                        title="Visit Hospital Website"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        Visit Website
+                      </a>
+                    </div>
+                    <Input
+                      value={clinicWebsite}
+                      onChange={(e) => setClinicWebsite(e.target.value)}
+                      className="h-10 rounded-xl border-slate-200 dark:border-slate-800 text-[14px]"
+                      placeholder="https://jabeershaik786.github.io/Sameeksha-Superspeciality-Dental-Hospital-Implant-Center/"
                     />
                   </div>
 
@@ -14289,6 +14511,19 @@ ${clinicName}`;
               </div>
             </div>
 
+            {/* Hospital Website Link */}
+            <a
+              href={clinicWebsite}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-600 hover:text-blue-600 dark:text-slate-400 dark:hover:text-white text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors shrink-0"
+              title="Visit Official Sameeksha Dental Hospital Website"
+            >
+              <Globe className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+              <span className="hidden md:inline">Hospital Website</span>
+              <ExternalLink className="h-3 w-3 opacity-60" />
+            </a>
+
             {/* Clinic Date */}
             <div className="hidden lg:block text-right text-[12px] border-r pr-3.5 border-slate-200 dark:border-slate-800 leading-none">
               <span className="font-semibold text-slate-700 dark:text-slate-300" suppressHydrationWarning>
@@ -14464,6 +14699,19 @@ ${clinicName}`;
               </div>
 
               <div className="border-t border-slate-100 dark:border-slate-800 pt-3 flex flex-col gap-2.5">
+                <a
+                  href={clinicWebsite}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Globe className="h-4 w-4 text-blue-600" />
+                    <span>Hospital Website</span>
+                  </div>
+                  <ExternalLink className="h-3.5 w-3.5 opacity-60" />
+                </a>
+
                 <button
                   onClick={handleLogout}
                   className="text-xs font-semibold text-red-655 flex items-center gap-2 text-left p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-955/20 transition-colors cursor-pointer"
