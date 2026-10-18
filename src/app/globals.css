@@ -513,7 +513,7 @@ section, [id] {
 
 @page {
   size: A4 portrait;
-  margin: 6mm 8mm;
+  margin: 0;
 }
 
 @media print {
@@ -522,6 +522,8 @@ section, [id] {
     color: black !important;
     margin: 0 !important;
     padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
   body * {
     visibility: hidden;
@@ -543,6 +545,17 @@ section, [id] {
     border: none !important;
     padding: 0 !important;
     margin: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  #print-area .official-case-sheet-container {
+    width: 210mm !important;
+    height: 291.2mm !important;
+    max-height: 291.2mm !important;
+    margin: 2.8mm auto !important;
+    overflow: hidden !important;
+    page-break-inside: avoid !important;
+    page-break-after: avoid !important;
   }
   /* Hide print buttons and layout wrappers during print */
   #print-area .no-print {
