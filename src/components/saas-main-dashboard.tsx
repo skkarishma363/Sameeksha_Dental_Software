@@ -153,7 +153,7 @@ interface Patient {
   visit: string;
   medicalNotes: string;
   balance: string;
-  status: "Active" | "Inactive";
+  status: "Active" | "Inactive" | "Archived";
   dentalChart: Record<number, string>;
   prescriptions: string[];
   files: FileAttachment[];
@@ -988,21 +988,31 @@ export function formatPhoneInput(val: string): string {
   return `+91 ${digits}`;
 }
 
-export function extractPhoneDigits(phoneStr: string): string {
+export function normalizeIndianPhone(phoneStr: string): string {
   if (!phoneStr) return "";
-  const clean = phoneStr.trim();
-  if (clean.startsWith("+91")) {
-    return clean.slice(3).replace(/\D/g, "");
+  const digits = phoneStr.replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) {
+    return digits.slice(2);
   }
-  const match = clean.match(/^(\+\d{1,3})\s*(.*)$/);
-  if (match) {
-    return match[2].replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("0")) {
+    return digits.slice(1);
   }
-  return clean.replace(/\D/g, "");
+  if (digits.length >= 10) {
+    return digits.slice(-10);
+  }
+  return digits;
+}
+
+export function normalizePatientName(nameStr: string): string {
+  return (nameStr || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+export function extractPhoneDigits(phoneStr: string): string {
+  return normalizeIndianPhone(phoneStr);
 }
 
 export function validate10DigitPhone(phoneStr: string): boolean {
-  const digits = extractPhoneDigits(phoneStr);
+  const digits = normalizeIndianPhone(phoneStr);
   return digits.length === 10;
 }
 
@@ -1287,7 +1297,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         visit: p.visit || "",
         medicalNotes: p.medical_notes || "None",
         balance: p.balance || "₹0",
-        status: (p.status === "Active" || p.status === "Inactive") ? p.status : "Active",
+        status: (p.status === "Active" || p.status === "Inactive" || p.status === "Archived") ? p.status : "Active",
         dentalChart: p.dental_chart || {},
         prescriptions: p.prescriptions || [],
         files: Array.isArray(p.files) ? p.files : [],
@@ -1768,6 +1778,42 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
   }, [showNotifications]);
   const [globalSearchQuery, setGlobalSearchQuery] = useState("");
   const [activeModal, setActiveModal] = useState<string | null>(null);
+  const [isRegisteringPatient, setIsRegisteringPatient] = useState(false);
+  const [duplicateMatchInfo, setDuplicateMatchInfo] = useState<{
+    isOpen: boolean;
+    type: "exact_duplicate" | "shared_family_phone" | "archived_patient";
+    matchingPatient: {
+      id: string;
+      uuid?: string;
+      name: string;
+      phone: string;
+      status: string;
+      visit?: string;
+    };
+    pendingPatientData: any;
+  } | null>(null);
+  const [patientFilterStatus, setPatientFilterStatus] = useState<"Active" | "Archived" | "All">("Active");
+  const [deleteConfirmDialog, setDeleteConfirmDialog] = useState<{
+    isOpen: boolean;
+    patient: Patient | null;
+    isChecking: boolean;
+    hasLinkedRecords: boolean;
+    counts: {
+      appointments: number;
+      treatments: number;
+      invoices: number;
+      prescriptions: number;
+      dentalChart: number;
+    };
+    actionInProgress: boolean;
+  }>({
+    isOpen: false,
+    patient: null,
+    isChecking: false,
+    hasLinkedRecords: false,
+    counts: { appointments: 0, treatments: 0, invoices: 0, prescriptions: 0, dentalChart: 0 },
+    actionInProgress: false
+  });
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [openTreatmentMenu, setOpenTreatmentMenu] = useState<string | null>(null);
 
@@ -5159,133 +5205,416 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     reference?: string;
     medicalHistory?: string[];
     medicalHistoryOthers?: string;
-  }) => {
-    const trimmedName = patientData.name.trim();
-    const trimmedPhone = patientData.phone.trim();
-    const parsedAge = typeof patientData.age === "string" ? (parseInt(patientData.age, 10) || 0) : patientData.age;
+  }, options?: { allowSharedPhone?: boolean }) => {
+    if (isRegisteringPatient) return false;
+    setIsRegisteringPatient(true);
 
-    if (!trimmedName) {
-      showToast("Patient name is required.", "error");
-      return false;
-    }
-    if (!trimmedPhone || trimmedPhone === "+91") {
-      showToast("Mobile number is required.", "error");
-      return false;
-    }
-    if (!validate10DigitPhone(trimmedPhone)) {
-      showToast("Mobile number must contain exactly 10 digits after +91.", "error");
-      return false;
-    }
+    try {
+      const trimmedName = patientData.name.trim();
+      const trimmedPhone = patientData.phone.trim();
+      const parsedAge = typeof patientData.age === "string" ? (parseInt(patientData.age, 10) || 0) : patientData.age;
 
-    // Retrieve currently authenticated Supabase user
-    const { data: { user }, error: userErr } = await supabase.auth.getUser();
-    if (userErr || !user) {
-      console.error("Patient insert failed: user not authenticated", userErr?.message, userErr?.code);
-      showToast("You must be logged in to register a patient.", "error");
-      return false;
-    }
-
-    // Check for duplicate mobile number in database
-    const { data: duplicatePat, error: checkErr } = await supabase
-      .from("patients")
-      .select("id")
-      .eq("phone", trimmedPhone)
-      .maybeSingle();
-
-    if (checkErr) {
-      console.error("Patient insert failed: duplicate phone check error", checkErr.message, checkErr.code);
-    } else if (duplicatePat) {
-      showToast(`A patient with mobile number ${trimmedPhone} is already registered.`, "error");
-      return false;
-    }
-
-    // Generate continuous 4-digit sequential Patient ID (0001, 0002, ...)
-    const { data: dbAllPats } = await supabase
-      .from("patients")
-      .select("patient_id");
-
-    const combinedList = dbAllPats && dbAllPats.length > 0 ? dbAllPats.map(p => ({ id: p.patient_id })) : patients;
-    const patientId = getNextSequentialPatientId(combinedList);
-
-    // Perform database insertion
-    const { data: insertedPat, error } = await supabase
-      .from("patients")
-      .insert({
-        patient_id: patientId,
-        name: trimmedName,
-        phone: trimmedPhone,
-        age: parsedAge,
-        gender: patientData.gender,
-        address: patientData.address || "Bengaluru",
-        visit: "12 Aug 2026",
-        medical_notes: patientData.medicalNotes || "None",
-        balance: "₹0",
-        status: "Active",
-        notes: patientData.notes || [],
-        email: patientData.email || null,
-        blood_group: patientData.bloodGroup || null,
-        patient_type: patientData.patientType || null,
-        occupation: patientData.occupation?.trim() || null,
-        reference: patientData.reference?.trim() || null,
-        medical_history: patientData.medicalHistory || [],
-        medical_history_others: patientData.medicalHistoryOthers?.trim() || null
-      })
-      .select()
-      .single();
-
-    if (error || !insertedPat) {
-      console.error("Patient insert failed:", error?.message, error?.code);
-      showToast("Failed to register patient in database.", "error");
-      return false;
-    }
-
-    const newPat: Patient = {
-      id: insertedPat.patient_id,
-      uuid: insertedPat.id,
-      name: insertedPat.name,
-      phone: insertedPat.phone,
-      age: insertedPat.age,
-      gender: insertedPat.gender,
-      address: insertedPat.address || "Bengaluru",
-      visit: insertedPat.visit || "12 Aug 2026",
-      medicalNotes: insertedPat.medical_notes || "None",
-      balance: insertedPat.balance || "₹0",
-      status: insertedPat.status || "Active",
-      dentalChart: {},
-      prescriptions: [],
-      files: [],
-      notes: insertedPat.notes || [],
-      email: insertedPat.email || undefined,
-      bloodGroup: insertedPat.blood_group || undefined,
-      patientType: insertedPat.patient_type || undefined,
-      occupation: insertedPat.occupation || undefined,
-      reference: insertedPat.reference || undefined,
-      medicalHistory: Array.isArray(insertedPat.medical_history) ? insertedPat.medical_history : [],
-      medicalHistoryOthers: insertedPat.medical_history_others || undefined,
-      createdAt: insertedPat.created_at || new Date().toISOString()
-    };
-
-    // Update state safely without duplicating
-    setPatients(prev => {
-      if (prev.some(p => p.id === newPat.id || p.uuid === newPat.uuid)) {
-        return prev;
+      if (!trimmedName) {
+        showToast("Patient name is required.", "error");
+        return false;
       }
-      return [newPat, ...prev];
+      if (!trimmedPhone || trimmedPhone === "+91") {
+        showToast("Mobile number is required.", "error");
+        return false;
+      }
+      if (!validate10DigitPhone(trimmedPhone)) {
+        showToast("Mobile number must contain exactly 10 digits after +91.", "error");
+        return false;
+      }
+
+      // Normalized 10-digit phone
+      const normPhone = normalizeIndianPhone(trimmedPhone);
+      const standardFormattedPhone = normPhone.length === 10
+        ? `+91 ${normPhone.slice(0, 5)} ${normPhone.slice(5)}`
+        : trimmedPhone;
+
+      // Retrieve currently authenticated Supabase user
+      const { data: { user }, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !user) {
+        console.error("Patient insert failed: user not authenticated", userErr?.message, userErr?.code);
+        showToast("You must be logged in to register a patient.", "error");
+        return false;
+      }
+
+      // Check for matching phone in local state
+      const localPhoneMatches = patients.filter(p => normalizeIndianPhone(p.phone) === normPhone);
+      let allMatches = [...localPhoneMatches];
+
+      // Query database for comprehensive duplicate detection
+      try {
+        const { data: dbAll } = await supabase
+          .from("patients")
+          .select("id, patient_id, name, phone, status, visit");
+        if (dbAll && dbAll.length > 0) {
+          dbAll.forEach(dbP => {
+            if (normalizeIndianPhone(dbP.phone) === normPhone) {
+              if (!allMatches.some(m => m.id === dbP.patient_id || m.uuid === dbP.id || m.id === dbP.id)) {
+                allMatches.push({
+                  id: dbP.patient_id,
+                  uuid: dbP.id,
+                  name: dbP.name,
+                  phone: dbP.phone,
+                  age: 0,
+                  gender: "Male",
+                  address: "",
+                  visit: dbP.visit || "",
+                  medicalNotes: "",
+                  balance: "₹0",
+                  status: (dbP.status as any) || "Active",
+                  dentalChart: {},
+                  prescriptions: [],
+                  files: [],
+                  notes: []
+                });
+              }
+            }
+          });
+        }
+      } catch (err) {
+        console.warn("Error querying database for duplicates:", err);
+      }
+
+      // Evaluate duplicates if matches exist
+      if (allMatches.length > 0) {
+        // 1. Check if an archived patient matches
+        const archivedMatch = allMatches.find(m => m.status === "Archived");
+        if (archivedMatch) {
+          setDuplicateMatchInfo({
+            isOpen: true,
+            type: "archived_patient",
+            matchingPatient: {
+              id: archivedMatch.id,
+              uuid: archivedMatch.uuid,
+              name: archivedMatch.name,
+              phone: archivedMatch.phone,
+              status: archivedMatch.status,
+              visit: archivedMatch.visit
+            },
+            pendingPatientData: patientData
+          });
+          showToast(`An archived patient file for ${archivedMatch.name} already exists with this phone.`, "error");
+          return false;
+        }
+
+        // 2. Check for exact duplicate (same normalized name + same phone)
+        const exactMatch = allMatches.find(m => normalizePatientName(m.name) === normalizePatientName(trimmedName));
+        if (exactMatch) {
+          setDuplicateMatchInfo({
+            isOpen: true,
+            type: "exact_duplicate",
+            matchingPatient: {
+              id: exactMatch.id,
+              uuid: exactMatch.uuid,
+              name: exactMatch.name,
+              phone: exactMatch.phone,
+              status: exactMatch.status,
+              visit: exactMatch.visit
+            },
+            pendingPatientData: patientData
+          });
+          showToast(`A patient with this mobile number already exists (${exactMatch.name}).`, "error");
+          return false;
+        }
+
+        // 3. Shared family phone (different name, same phone)
+        if (!options?.allowSharedPhone) {
+          const firstMatch = allMatches[0];
+          setDuplicateMatchInfo({
+            isOpen: true,
+            type: "shared_family_phone",
+            matchingPatient: {
+              id: firstMatch.id,
+              uuid: firstMatch.uuid,
+              name: firstMatch.name,
+              phone: firstMatch.phone,
+              status: firstMatch.status,
+              visit: firstMatch.visit
+            },
+            pendingPatientData: patientData
+          });
+          return false;
+        }
+      }
+
+      // Generate continuous 4-digit sequential Patient ID (0001, 0002, ...)
+      const { data: dbAllPats } = await supabase
+        .from("patients")
+        .select("patient_id");
+
+      const combinedList = dbAllPats && dbAllPats.length > 0 ? dbAllPats.map(p => ({ id: p.patient_id })) : patients;
+      const patientId = getNextSequentialPatientId(combinedList);
+
+      // Perform database insertion
+      const { data: insertedPat, error } = await supabase
+        .from("patients")
+        .insert({
+          patient_id: patientId,
+          name: trimmedName,
+          phone: standardFormattedPhone,
+          age: parsedAge,
+          gender: patientData.gender,
+          address: patientData.address || "Bengaluru",
+          visit: "12 Aug 2026",
+          medical_notes: patientData.medicalNotes || "None",
+          balance: "₹0",
+          status: "Active",
+          notes: patientData.notes || [],
+          email: patientData.email || null,
+          blood_group: patientData.bloodGroup || null,
+          patient_type: patientData.patientType || null,
+          occupation: patientData.occupation?.trim() || null,
+          reference: patientData.reference?.trim() || null,
+          medical_history: patientData.medicalHistory || [],
+          medical_history_others: patientData.medicalHistoryOthers?.trim() || null
+        })
+        .select()
+        .single();
+
+      if (error || !insertedPat) {
+        console.error("Patient insert failed:", error?.message, error?.code);
+        if (error?.message?.includes("DUPLICATE_PATIENT_ERROR") || error?.message?.includes("duplicate")) {
+          showToast("Duplicate registration prevented: A patient with this name and phone already exists.", "error");
+        } else {
+          showToast("Failed to register patient in database.", "error");
+        }
+        return false;
+      }
+
+      const newPat: Patient = {
+        id: insertedPat.patient_id,
+        uuid: insertedPat.id,
+        name: insertedPat.name,
+        phone: insertedPat.phone,
+        age: insertedPat.age,
+        gender: insertedPat.gender,
+        address: insertedPat.address || "Bengaluru",
+        visit: insertedPat.visit || "12 Aug 2026",
+        medicalNotes: insertedPat.medical_notes || "None",
+        balance: insertedPat.balance || "₹0",
+        status: insertedPat.status || "Active",
+        dentalChart: {},
+        prescriptions: [],
+        files: [],
+        notes: insertedPat.notes || [],
+        email: insertedPat.email || undefined,
+        bloodGroup: insertedPat.blood_group || undefined,
+        patientType: insertedPat.patient_type || undefined,
+        occupation: insertedPat.occupation || undefined,
+        reference: insertedPat.reference || undefined,
+        medicalHistory: Array.isArray(insertedPat.medical_history) ? insertedPat.medical_history : [],
+        medicalHistoryOthers: insertedPat.medical_history_others || undefined,
+        createdAt: insertedPat.created_at || new Date().toISOString()
+      };
+
+      // Update state safely without duplicating
+      setPatients(prev => {
+        if (prev.some(p => p.id === newPat.id || p.uuid === newPat.uuid)) {
+          return prev;
+        }
+        return [newPat, ...prev];
+      });
+      pushActivity("Register", `Registered patient ${trimmedName} (${patientId}).`);
+
+      // Add notification
+      setNotifications(prev => [
+        {
+          id: Date.now() + Math.floor(Math.random() * 100000),
+          msg: `New Patient ${trimmedName} registered successfully.`,
+          unread: true
+        },
+        ...prev
+      ]);
+
+      showToast("Patient registered successfully.", "success");
+      return true;
+    } finally {
+      setIsRegisteringPatient(false);
+    }
+  };
+
+  const handleOpenExistingFromDuplicate = (matchId: string) => {
+    setDuplicateMatchInfo(null);
+    if (activeModal === "addPatient") setActiveModal(null);
+    if (activeSubTab === "Add Patient") setActiveSubTab("All Patients");
+    setSelectedPatientId(matchId);
+    selectTab("Patients");
+    showToast("Opened existing patient profile.", "success");
+  };
+
+  const handleProceedSharedFamilyRegistration = async () => {
+    if (!duplicateMatchInfo?.pendingPatientData) return;
+    const data = duplicateMatchInfo.pendingPatientData;
+    setDuplicateMatchInfo(null);
+    const saved = await registerPatient(data, { allowSharedPhone: true });
+    if (saved) {
+      setNewPatName("");
+      setNewPatPhone("+91 ");
+      setNewPatAddress("");
+      setNewPatAllergies("None");
+      setNewPatAge("");
+      if (activeModal === "addPatient") setActiveModal(null);
+      if (activeSubTab === "Add Patient") setActiveSubTab("All Patients");
+    }
+  };
+
+  const handleRestoreArchivedFromDuplicate = async (matchingPatient: any) => {
+    setDuplicateMatchInfo(null);
+    await handleRestorePatient(matchingPatient);
+    if (activeModal === "addPatient") setActiveModal(null);
+    if (activeSubTab === "Add Patient") setActiveSubTab("All Patients");
+    setSelectedPatientId(matchingPatient.id);
+    selectTab("Patients");
+  };
+
+  const handleInitiateDeletePatient = async (pat: Patient) => {
+    if (userRole !== "owner") {
+      showToast("Permission denied: Only clinic owners/administrators can delete or archive patient records.", "error");
+      return;
+    }
+
+    setDeleteConfirmDialog({
+      isOpen: true,
+      patient: pat,
+      isChecking: true,
+      hasLinkedRecords: false,
+      counts: { appointments: 0, treatments: 0, invoices: 0, prescriptions: 0, dentalChart: 0 },
+      actionInProgress: false
     });
-    pushActivity("Register", `Registered patient ${trimmedName} (${patientId}).`);
 
-    // Add notification
-    setNotifications(prev => [
-      {
-        id: Date.now() + Math.floor(Math.random() * 100000),
-        msg: `New Patient ${trimmedName} registered successfully.`,
-        unread: true
+    const localApptCount = appointments.filter(a => a.patientId === pat.id || a.patientId === pat.uuid).length;
+    const localTreatCount = treatments.filter(t => t.patient === pat.name || (t as any).patient_id === pat.id || (t as any).patient_id === pat.uuid).length;
+    const localInvCount = invoices.filter(i => i.patientId === pat.id || i.patientId === pat.uuid).length;
+    const localRxCount = pat.prescriptions?.length || 0;
+    const localChartCount = Object.keys(pat.dentalChart || {}).length;
+
+    let serverAppts = localApptCount;
+    let serverTreats = localTreatCount;
+    let serverInvs = localInvCount;
+
+    try {
+      const patientIdMatch = pat.uuid || pat.id;
+      const [apptRes, treatRes, invRes] = await Promise.all([
+        supabase.from("appointments").select("id", { count: "exact", head: true }).eq("patient_id", patientIdMatch),
+        supabase.from("treatments").select("id", { count: "exact", head: true }).eq("patient_id", patientIdMatch),
+        supabase.from("invoices").select("id", { count: "exact", head: true }).eq("patient_id", patientIdMatch)
+      ]);
+      if (typeof apptRes.count === "number") serverAppts = Math.max(localApptCount, apptRes.count);
+      if (typeof treatRes.count === "number") serverTreats = Math.max(localTreatCount, treatRes.count);
+      if (typeof invRes.count === "number") serverInvs = Math.max(localInvCount, invRes.count);
+    } catch (e) {
+      console.warn("Error fetching remote record counts for patient deletion:", e);
+    }
+
+    const hasLinked = (serverAppts > 0 || serverTreats > 0 || serverInvs > 0 || localRxCount > 0 || localChartCount > 0);
+
+    setDeleteConfirmDialog({
+      isOpen: true,
+      patient: pat,
+      isChecking: false,
+      hasLinkedRecords: hasLinked,
+      counts: {
+        appointments: serverAppts,
+        treatments: serverTreats,
+        invoices: serverInvs,
+        prescriptions: localRxCount,
+        dentalChart: localChartCount
       },
-      ...prev
-    ]);
+      actionInProgress: false
+    });
+  };
 
-    showToast("Patient registered successfully.", "success");
-    return true;
+  const handleConfirmArchive = async (pat: Patient) => {
+    if (userRole !== "owner") {
+      showToast("Permission denied: Only practice owners can archive patients.", "error");
+      return;
+    }
+    setDeleteConfirmDialog(prev => ({ ...prev, actionInProgress: true }));
+    try {
+      const targetId = pat.uuid || pat.id;
+      const { error } = await supabase
+        .from("patients")
+        .update({ status: "Archived" })
+        .or(`id.eq.${targetId},patient_id.eq.${pat.id}`);
+
+      if (error) {
+        console.error("Failed to archive patient in database:", error.message);
+        showToast("Failed to archive patient in database.", "error");
+        return;
+      }
+
+      setPatients(prev => prev.map(p => (p.id === pat.id || p.uuid === pat.uuid) ? { ...p, status: "Archived" } : p));
+      pushActivity("Register", `Archived patient file for ${pat.name} (${pat.id}). Historical records preserved.`);
+      showToast(`Patient file for ${pat.name} (${pat.id}) archived. Historical records preserved.`, "success");
+      setDeleteConfirmDialog({ isOpen: false, patient: null, isChecking: false, hasLinkedRecords: false, counts: { appointments: 0, treatments: 0, invoices: 0, prescriptions: 0, dentalChart: 0 }, actionInProgress: false });
+    } catch (e: any) {
+      showToast(e.message || "Failed to archive patient.", "error");
+    } finally {
+      setDeleteConfirmDialog(prev => ({ ...prev, actionInProgress: false }));
+    }
+  };
+
+  const handleConfirmPermanentDelete = async (pat: Patient) => {
+    if (userRole !== "owner") {
+      showToast("Permission denied: Only practice owners can delete patients.", "error");
+      return;
+    }
+    if (deleteConfirmDialog.hasLinkedRecords) {
+      showToast("Cannot permanently delete patient with linked clinical or billing records.", "error");
+      return;
+    }
+    setDeleteConfirmDialog(prev => ({ ...prev, actionInProgress: true }));
+    try {
+      const targetId = pat.uuid || pat.id;
+      const { error } = await supabase
+        .from("patients")
+        .delete()
+        .or(`id.eq.${targetId},patient_id.eq.${pat.id}`);
+
+      if (error) {
+        console.error("Failed to delete patient from database:", error.message);
+        showToast("Failed to delete patient: " + error.message, "error");
+        return;
+      }
+
+      setPatients(prev => prev.filter(p => p.id !== pat.id && p.uuid !== pat.uuid));
+      if (selectedPatientId === pat.id) {
+        setSelectedPatientId(null);
+      }
+      pushActivity("Register", `Permanently deleted patient file for ${pat.name} (${pat.id}).`);
+      showToast(`Patient record for ${pat.name} (${pat.id}) permanently deleted.`, "success");
+      setDeleteConfirmDialog({ isOpen: false, patient: null, isChecking: false, hasLinkedRecords: false, counts: { appointments: 0, treatments: 0, invoices: 0, prescriptions: 0, dentalChart: 0 }, actionInProgress: false });
+    } catch (e: any) {
+      showToast(e.message || "Failed to delete patient.", "error");
+    } finally {
+      setDeleteConfirmDialog(prev => ({ ...prev, actionInProgress: false }));
+    }
+  };
+
+  const handleRestorePatient = async (pat: Patient | any) => {
+    if (userRole !== "owner") {
+      showToast("Permission denied: Only practice owners can restore patients.", "error");
+      return;
+    }
+    const targetId = pat.uuid || pat.id;
+    const { error } = await supabase
+      .from("patients")
+      .update({ status: "Active" })
+      .or(`id.eq.${targetId},patient_id.eq.${pat.id}`);
+
+    if (error) {
+      console.error("Failed to restore patient:", error.message);
+      showToast("Failed to restore patient: " + error.message, "error");
+      return;
+    }
+
+    setPatients(prev => prev.map(p => (p.id === pat.id || p.uuid === pat.uuid) ? { ...p, status: "Active" } : p));
+    pushActivity("Register", `Restored patient file for ${pat.name} (${pat.id}) to Active.`);
+    showToast(`Patient file for ${pat.name} (${pat.id}) restored to Active.`, "success");
   };
 
   const handleSavePatientQuick = async (e: React.FormEvent) => {
@@ -10913,8 +11242,31 @@ ${clinicName}`;
                   className="w-full text-xs font-semibold outline-none bg-transparent dark:text-slate-200"
                 />
               </div>
-              <div className="flex gap-3 shrink-0">
-                <Button onClick={() => setActiveSubTab("Add Patient")} className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs h-9 rounded-lg px-4">
+              <div className="flex flex-wrap items-center gap-3 shrink-0">
+                <div className="inline-flex rounded-lg p-0.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px] font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setPatientFilterStatus("Active")}
+                    className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${patientFilterStatus === "Active" ? "bg-white dark:bg-slate-800 text-blue-600 shadow-xs font-bold" : "text-slate-500 hover:text-slate-800 dark:text-slate-400"}`}
+                  >
+                    Active ({patients.filter(p => p.status !== "Archived").length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPatientFilterStatus("Archived")}
+                    className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${patientFilterStatus === "Archived" ? "bg-white dark:bg-slate-800 text-amber-600 shadow-xs font-bold" : "text-slate-500 hover:text-slate-800 dark:text-slate-400"}`}
+                  >
+                    Archived ({patients.filter(p => p.status === "Archived").length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPatientFilterStatus("All")}
+                    className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${patientFilterStatus === "All" ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs font-bold" : "text-slate-500 hover:text-slate-800 dark:text-slate-400"}`}
+                  >
+                    All ({patients.length})
+                  </button>
+                </div>
+                <Button onClick={() => setActiveSubTab("Add Patient")} className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs h-9 rounded-lg px-4 cursor-pointer">
                   <Plus className="h-4 w-4 mr-1.5" /> Register Patient
                 </Button>
               </div>
@@ -10935,6 +11287,8 @@ ${clinicName}`;
               <tbody className="divide-y divide-slate-100 dark:divide-slate-900 text-slate-705">
                 {patients
                   .filter(pat => {
+                    if (patientFilterStatus === "Active" && pat.status === "Archived") return false;
+                    if (patientFilterStatus === "Archived" && pat.status !== "Archived") return false;
                     if (!patientsDirectoryQuery.trim()) return true;
                     const q = patientsDirectoryQuery.toLowerCase();
                     return pat.name.toLowerCase().includes(q) || pat.id.toLowerCase().includes(q) || pat.phone.includes(q);
@@ -10952,13 +11306,34 @@ ${clinicName}`;
                       <td className="py-3.5 px-3 text-[14px] sm:text-[15px] font-semibold text-red-600 whitespace-nowrap">{pat.balance}</td>
                       <td className="py-3.5 px-3 whitespace-nowrap">
                         <span className={`px-2.5 py-0.5 rounded-full text-[12px] sm:text-[13px] font-medium inline-block ${
-                          pat.status === "Active" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
+                          pat.status === "Active" ? "bg-emerald-50 text-emerald-700" :
+                          pat.status === "Archived" ? "bg-amber-50 text-amber-700 dark:bg-amber-955/30 dark:text-amber-300" :
+                          "bg-slate-100 text-slate-500"
                         }`}>{pat.status}</span>
                       </td>
                       <td className="py-3.5 px-3 text-center whitespace-nowrap">
-                        <button onClick={() => setSelectedPatientId(pat.id)} className="text-blue-605 hover:underline text-[14px] sm:text-[15px] font-semibold cursor-pointer">
-                          Open Profile
-                        </button>
+                        <div className="flex items-center justify-center gap-2">
+                          <button onClick={() => setSelectedPatientId(pat.id)} className="text-blue-605 hover:underline text-[14px] sm:text-[15px] font-semibold cursor-pointer">
+                            Open Profile
+                          </button>
+                          {pat.status === "Archived" ? (
+                            <button
+                              onClick={() => handleRestorePatient(pat)}
+                              className="text-amber-600 hover:text-amber-700 hover:underline text-[12px] font-semibold cursor-pointer px-2 py-0.5 rounded border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-955/20"
+                              title="Restore to Active"
+                            >
+                              Restore
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleInitiateDeletePatient(pat)}
+                              className="text-slate-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-955/20 transition-colors cursor-pointer"
+                              title="Delete or Archive Patient"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -14812,7 +15187,9 @@ ${clinicName}`;
                   </div>
                   <div className="flex gap-3 justify-end pt-3 border-t border-slate-100 dark:border-slate-800 mt-3 shrink-0">
                     <Button type="button" variant="outline" onClick={() => setActiveModal(null)}>Cancel</Button>
-                    <Button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white font-semibold">Register Patient</Button>
+                    <Button type="submit" disabled={isRegisteringPatient} className="bg-blue-600 hover:bg-blue-500 text-white font-semibold cursor-pointer">
+                      {isRegisteringPatient ? "Registering..." : "Register Patient"}
+                    </Button>
                   </div>
                 </form>
               )}
@@ -16747,6 +17124,279 @@ ${clinicName}`;
               </Button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* DUPLICATE PATIENT DETECTION / REVIEW MODAL */}
+      {duplicateMatchInfo?.isOpen && (
+        <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-5 sm:p-6 w-full max-w-lg space-y-5"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3.5">
+              <div className="flex items-center gap-3">
+                <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                  duplicateMatchInfo.type === "exact_duplicate"
+                    ? "bg-red-50 text-red-600 dark:bg-red-955/40 dark:text-red-400 border-red-100 dark:border-red-900/40"
+                    : duplicateMatchInfo.type === "archived_patient"
+                    ? "bg-amber-50 text-amber-600 dark:bg-amber-955/40 dark:text-amber-400 border-amber-100 dark:border-amber-900/40"
+                    : "bg-blue-50 text-blue-600 dark:bg-blue-955/40 dark:text-blue-400 border-blue-100 dark:border-blue-900/40"
+                }`}>
+                  <AlertTriangle className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    {duplicateMatchInfo.type === "exact_duplicate" && "Duplicate Patient Detected"}
+                    {duplicateMatchInfo.type === "shared_family_phone" && "Shared Phone Number Notice"}
+                    {duplicateMatchInfo.type === "archived_patient" && "Archived Patient Record Found"}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    {duplicateMatchInfo.type === "exact_duplicate" && "A record with this phone number and name already exists."}
+                    {duplicateMatchInfo.type === "shared_family_phone" && "This contact number is already registered to an existing patient."}
+                    {duplicateMatchInfo.type === "archived_patient" && "A previously archived patient matches this phone number."}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDuplicateMatchInfo(null)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Explanation banner */}
+            <div className={`p-3.5 rounded-xl text-xs leading-relaxed border ${
+              duplicateMatchInfo.type === "exact_duplicate"
+                ? "bg-red-50/70 border-red-200 text-red-800 dark:bg-red-955/20 dark:border-red-900/50 dark:text-red-300"
+                : duplicateMatchInfo.type === "archived_patient"
+                ? "bg-amber-50/70 border-amber-200 text-amber-800 dark:bg-amber-955/20 dark:border-amber-900/50 dark:text-amber-300"
+                : "bg-blue-50/70 border-blue-200 text-blue-800 dark:bg-blue-955/20 dark:border-blue-900/50 dark:text-blue-300"
+            }`}>
+              {duplicateMatchInfo.type === "exact_duplicate" && (
+                <span>
+                  Automatic creation was stopped to prevent duplicate records. The patient <strong>{duplicateMatchInfo.matchingPatient.name}</strong> is already registered. You can open their existing profile below.
+                </span>
+              )}
+              {duplicateMatchInfo.type === "shared_family_phone" && (
+                <span>
+                  A patient with this mobile number already exists: <strong>{duplicateMatchInfo.matchingPatient.name}</strong> ({duplicateMatchInfo.matchingPatient.id}). If this is a family member sharing the phone number, staff may proceed with registration.
+                </span>
+              )}
+              {duplicateMatchInfo.type === "archived_patient" && (
+                <span>
+                  This phone number belongs to an archived patient (<strong>{duplicateMatchInfo.matchingPatient.name}</strong>). To keep historical dental and billing records continuous, you can restore their profile.
+                </span>
+              )}
+            </div>
+
+            {/* Existing Patient Card */}
+            <div className="bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-2.5">
+              <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
+                Existing Patient Details
+              </span>
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <span className="text-slate-500 block text-[11px]">Patient Name</span>
+                  <span className="font-bold text-slate-900 dark:text-white text-sm">{duplicateMatchInfo.matchingPatient.name}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[11px]">Patient ID</span>
+                  <span className="font-bold text-blue-600 dark:text-blue-400 font-mono">{duplicateMatchInfo.matchingPatient.id}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[11px]">Mobile Number</span>
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">{duplicateMatchInfo.matchingPatient.phone}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[11px]">Status</span>
+                  <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                    duplicateMatchInfo.matchingPatient.status === "Active" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-955/40 dark:text-emerald-300" :
+                    duplicateMatchInfo.matchingPatient.status === "Archived" ? "bg-amber-100 text-amber-800 dark:bg-amber-955/40 dark:text-amber-300" :
+                    "bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300"
+                  }`}>
+                    {duplicateMatchInfo.matchingPatient.status}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-col sm:flex-row justify-end gap-2.5 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDuplicateMatchInfo(null)}
+                className="text-xs h-9 cursor-pointer"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => handleOpenExistingFromDuplicate(duplicateMatchInfo.matchingPatient.id)}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs h-9 cursor-pointer"
+              >
+                Open Existing Patient
+              </Button>
+              {duplicateMatchInfo.type === "shared_family_phone" && (
+                <Button
+                  type="button"
+                  onClick={handleProceedSharedFamilyRegistration}
+                  className="bg-slate-800 hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-bold text-xs h-9 cursor-pointer"
+                >
+                  Register as Family Member
+                </Button>
+              )}
+              {duplicateMatchInfo.type === "archived_patient" && (
+                <Button
+                  type="button"
+                  onClick={() => handleRestoreArchivedFromDuplicate(duplicateMatchInfo.matchingPatient)}
+                  className="bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs h-9 cursor-pointer"
+                >
+                  Restore & Open Patient
+                </Button>
+              )}
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* PATIENT DELETE / ARCHIVE CONFIRMATION MODAL */}
+      {deleteConfirmDialog.isOpen && deleteConfirmDialog.patient && (
+        <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-5 sm:p-6 w-full max-w-lg space-y-5"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3.5">
+              <div className="flex items-center gap-3">
+                <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                  deleteConfirmDialog.hasLinkedRecords
+                    ? "bg-amber-50 text-amber-600 dark:bg-amber-955/40 dark:text-amber-400 border-amber-100 dark:border-amber-900/40"
+                    : "bg-red-50 text-red-600 dark:bg-red-955/40 dark:text-red-400 border-red-100 dark:border-red-900/40"
+                }`}>
+                  {deleteConfirmDialog.hasLinkedRecords ? <Shield className="h-5 w-5" /> : <Trash2 className="h-5 w-5" />}
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    {deleteConfirmDialog.hasLinkedRecords ? "Archive Patient File" : "Delete Patient Record"}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    {deleteConfirmDialog.patient.name} • ID: {deleteConfirmDialog.patient.id}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmDialog({ isOpen: false, patient: null, isChecking: false, hasLinkedRecords: false, counts: { appointments: 0, treatments: 0, invoices: 0, prescriptions: 0, dentalChart: 0 }, actionInProgress: false })}
+                className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Patient overview card */}
+            <div className="bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                <div>
+                  <span className="text-slate-500 text-[11px] block">Patient Name</span>
+                  <span className="font-bold text-slate-900 dark:text-white">{deleteConfirmDialog.patient.name}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 text-[11px] block">Patient ID</span>
+                  <span className="font-bold text-blue-600 dark:text-blue-400 font-mono">{deleteConfirmDialog.patient.id}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 text-[11px] block">Mobile</span>
+                  <span className="font-medium text-slate-700 dark:text-slate-300">{deleteConfirmDialog.patient.phone}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Linked Records Assessment */}
+            {deleteConfirmDialog.isChecking ? (
+              <div className="flex items-center justify-center p-6 text-slate-500 gap-2">
+                <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                <span className="text-xs">Checking associated clinical and financial records...</span>
+              </div>
+            ) : deleteConfirmDialog.hasLinkedRecords ? (
+              <div className="space-y-3">
+                <div className="p-3.5 bg-amber-50 dark:bg-amber-955/20 border border-amber-200 dark:border-amber-900/40 rounded-xl text-xs space-y-1.5 text-amber-900 dark:text-amber-200">
+                  <span className="font-bold flex items-center gap-1.5 text-amber-800 dark:text-amber-300">
+                    <Shield className="h-4 w-4" /> Clinical Retention Protection
+                  </span>
+                  <p className="leading-relaxed">
+                    This patient has historical clinical records that must be retained for medical regulations and audit compliance. To protect these records from permanent loss, this patient will be <strong>Archived</strong> (soft-deleted).
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-center text-xs">
+                  <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-955">
+                    <span className="block text-base font-bold text-blue-600 dark:text-blue-400">{deleteConfirmDialog.counts.appointments}</span>
+                    <span className="text-[11px] text-slate-500 font-medium">Appointments</span>
+                  </div>
+                  <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-955">
+                    <span className="block text-base font-bold text-emerald-600 dark:text-emerald-400">{deleteConfirmDialog.counts.treatments}</span>
+                    <span className="text-[11px] text-slate-500 font-medium">Treatments</span>
+                  </div>
+                  <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-955">
+                    <span className="block text-base font-bold text-indigo-600 dark:text-indigo-400">{deleteConfirmDialog.counts.invoices}</span>
+                    <span className="text-[11px] text-slate-500 font-medium">Invoices</span>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">
+                  Archiving hides the patient from active directory lists while preserving all consultation notes, prescriptions, and billing logs.
+                </p>
+              </div>
+            ) : (
+              <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-xl text-xs space-y-1 text-slate-700 dark:text-slate-300">
+                <span className="font-bold block text-slate-900 dark:text-white">Zero Linked Records Detected</span>
+                <p className="leading-relaxed">
+                  This patient file has no associated appointments, treatments, or invoices. You can archive the file or permanently remove it.
+                </p>
+              </div>
+            )}
+
+            {/* Footer Buttons */}
+            <div className="flex flex-col sm:flex-row justify-end gap-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={deleteConfirmDialog.actionInProgress}
+                onClick={() => setDeleteConfirmDialog({ isOpen: false, patient: null, isChecking: false, hasLinkedRecords: false, counts: { appointments: 0, treatments: 0, invoices: 0, prescriptions: 0, dentalChart: 0 }, actionInProgress: false })}
+                className="text-xs h-9 cursor-pointer"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={deleteConfirmDialog.actionInProgress}
+                onClick={() => handleConfirmArchive(deleteConfirmDialog.patient!)}
+                className="bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs h-9 cursor-pointer flex items-center gap-1.5"
+              >
+                {deleteConfirmDialog.actionInProgress && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Confirm Archive File
+              </Button>
+              {!deleteConfirmDialog.hasLinkedRecords && !deleteConfirmDialog.isChecking && (
+                <Button
+                  type="button"
+                  disabled={deleteConfirmDialog.actionInProgress}
+                  onClick={() => handleConfirmPermanentDelete(deleteConfirmDialog.patient!)}
+                  className="bg-red-600 hover:bg-red-500 text-white font-bold text-xs h-9 cursor-pointer flex items-center gap-1.5"
+                >
+                  {deleteConfirmDialog.actionInProgress && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  Permanently Delete
+                </Button>
+              )}
+            </div>
+          </motion.div>
         </div>
       )}
     </div>
