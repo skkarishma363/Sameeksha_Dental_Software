@@ -10152,9 +10152,9 @@ ${clinicName}`;
                     {/* Clinic Header */}
                     <div className="border-b-2 border-slate-800 pb-4 mb-4 flex justify-between items-start print:break-inside-avoid">
                       <div className="space-y-1">
-                        <h1 className="text-xl font-bold text-blue-900 tracking-tight">{clinicName || "VR Dental Care Dental Implant Centre"}</h1>
-                        <p className="text-xs text-slate-600 font-medium">3rd Cross St, opp. GMC Balayogi stadium, Zicria Nagar, Yanam, Andhra Pradesh 533464</p>
-                        <p className="text-xs text-slate-800 font-bold">PH: 09885349798</p>
+                        <h1 className="text-xl font-bold text-blue-900 tracking-tight">{clinicName || "Sameeksha Super Speciality Dental Hospital"}</h1>
+                        <p className="text-xs text-slate-600 font-medium">CHOWDARY GUEST HOUSE, GROUND FLOOR, NEAR RTC COLONY 4 ROAD JUNCTION, Ramanayapeta, Andhra Pradesh 533005</p>
+                        <p className="text-xs text-slate-800 font-bold">PH: 088859 99857</p>
                       </div>
                       <div className="text-right space-y-1">
                         <span className="text-lg font-black text-blue-900 uppercase tracking-wider block">PRESCRIPTION</span>
@@ -15087,13 +15087,13 @@ ${clinicName}`;
               {/* Clinic details header (Centered) */}
               <div className="text-center space-y-1 pb-2">
                 <h1 className="text-xl font-extrabold text-blue-900 tracking-tight">
-                  VR Dental Care Dental Implant Centre
+                  Sameeksha Super Speciality Dental Hospital
                 </h1>
                 <p className="text-[11px] text-slate-700 font-medium max-w-md mx-auto leading-tight">
-                  3rd Cross St, opp. GMC Balayogi stadium, Zicria Nagar, Yanam, Andhra Pradesh 533464
+                  CHOWDARY GUEST HOUSE, GROUND FLOOR, NEAR RTC COLONY 4 ROAD JUNCTION, Ramanayapeta, Andhra Pradesh 533005
                 </p>
                 <p className="text-[11px] font-bold text-slate-800">
-                  PH: 09885349798
+                  PH: 088859 99857
                 </p>
               </div>
               <hr className="border-slate-400 my-2" />
@@ -15257,8 +15257,8 @@ ${clinicName}`;
 
                 <div className="text-left sm:text-right print:text-right space-y-1 text-slate-900 shrink-0 self-end sm:self-auto">
                   <div className="font-bold">Authorised Signatory</div>
-                  <div className="text-[11px] font-semibold text-slate-800">VR Dental Care Dental Implant Centre</div>
-                  <div className="text-[10px] font-bold tracking-wider uppercase text-slate-900">PROSTHODONTIST</div>
+                  <div className="text-[11px] font-semibold text-slate-800">Sameeksha Super Speciality Dental Hospital</div>
+                  <div className="text-[10px] font-bold tracking-wider uppercase text-slate-900">DENTAL SURGEON & IMPLANTOLOGIST</div>
                 </div>
               </div>
 

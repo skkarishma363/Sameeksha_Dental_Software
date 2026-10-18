@@ -6,8 +6,8 @@ import FloatingButtons from "@/components/FloatingButtons";
 import { ShieldCheck, ArrowLeft, Lock, FileText, Phone, Mail, MapPin } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy | V.R. Dental Care & Dental Implant Centre",
-  description: "Privacy Policy and patient data protection practices for V.R. Dental Care & Dental Implant Centre in Yanam.",
+  title: "Privacy Policy | Sameeksha Super Speciality Dental Hospital",
+  description: "Privacy Policy and patient health data protection practices for Sameeksha Super Speciality Dental Hospital & Implant Centre in Ramanayyapeta.",
 };
 
 export default function PrivacyPolicyPage() {
@@ -16,7 +16,7 @@ export default function PrivacyPolicyPage() {
       <Navbar />
       <main className="flex-grow pt-28 pb-20 bg-[#f8fafc]">
         {/* Header Banner */}
-        <section className="bg-gradient-to-r from-[#0284c7] via-[#0ea5e9] to-[#38bdf8] text-white py-14 px-6 md:px-12 lg:px-20 relative overflow-hidden">
+        <section className="bg-gradient-to-r from-[#c41215] via-[#E71B1E] to-[#0AA8DE] text-white py-14 px-6 md:px-12 lg:px-20 relative overflow-hidden">
           <div className="max-w-[1100px] mx-auto relative z-10">
             <Link
               href="/"
@@ -37,10 +37,10 @@ export default function PrivacyPolicyPage() {
               Privacy Policy
             </h1>
             <p className="mt-3 text-white/90 text-sm sm:text-base max-w-2xl font-normal">
-              How V.R. Dental Care & Dental Implant Centre collects, uses, and safeguards your health and personal information.
+              How Sameeksha Super Speciality Dental Hospital & Implant Centre collects, uses, and safeguards your health and personal information.
             </p>
             <p className="mt-2 text-xs text-white/70">
-              Last Updated: September 2026 | Effective Date: September 2026
+              Last Updated: October 2026 | Effective Date: October 2026
             </p>
           </div>
         </section>
@@ -52,18 +52,18 @@ export default function PrivacyPolicyPage() {
             {/* Introduction */}
             <div>
               <h2 className="text-xl sm:text-2xl font-bold text-[#0f2942] mb-4 flex items-center gap-2.5">
-                <span className="w-2 h-6 bg-[#0284c7] rounded-full inline-block" />
+                <span className="w-2 h-6 bg-[#E71B1E] rounded-full inline-block" />
                 1. Introduction
               </h2>
               <p className="text-slate-600 leading-relaxed text-sm sm:text-base">
-                Welcome to <strong>V.R. Dental Care & Dental Implant Centre</strong> (&quot;we,&quot; &quot;our,&quot; or &quot;us&quot;). We are committed to maintaining the confidentiality, integrity, and security of your personal and dental medical information. This Privacy Policy describes how we collect, store, process, and protect information obtained through our clinic visits, website, online consultancy requests, and communication channels.
+                Welcome to <strong>Sameeksha Super Speciality Dental Hospital & Implant Centre</strong> (&quot;we,&quot; &quot;our,&quot; or &quot;us&quot;). We are committed to maintaining the confidentiality, integrity, and security of your personal and dental medical information. This Privacy Policy describes how we collect, store, process, and protect information obtained through our hospital visits, website, online consultancy requests, and communication channels.
               </p>
             </div>
 
             {/* Information We Collect */}
             <div>
               <h2 className="text-xl sm:text-2xl font-bold text-[#0f2942] mb-4 flex items-center gap-2.5">
-                <span className="w-2 h-6 bg-[#0284c7] rounded-full inline-block" />
+                <span className="w-2 h-6 bg-[#E71B1E] rounded-full inline-block" />
                 2. Information We Collect
               </h2>
               <p className="text-slate-600 leading-relaxed text-sm sm:text-base mb-4">
@@ -88,13 +88,13 @@ export default function PrivacyPolicyPage() {
             {/* How We Use Your Information */}
             <div>
               <h2 className="text-xl sm:text-2xl font-bold text-[#0f2942] mb-4 flex items-center gap-2.5">
-                <span className="w-2 h-6 bg-[#0284c7] rounded-full inline-block" />
+                <span className="w-2 h-6 bg-[#E71B1E] rounded-full inline-block" />
                 3. How We Use Your Information
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
                 <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/60">
                   <h3 className="font-semibold text-sm text-[#0f2942] mb-1.5 flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-[#0284c7]" /> Clinical Care
+                    <FileText className="w-4 h-4 text-[#0AA8DE]" /> Clinical Care
                   </h3>
                   <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
                     Formulating accurate treatment plans, performing surgical procedures, tracking healing progress, and scheduling recalls.
@@ -102,7 +102,7 @@ export default function PrivacyPolicyPage() {
                 </div>
                 <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/60">
                   <h3 className="font-semibold text-sm text-[#0f2942] mb-1.5 flex items-center gap-2">
-                    <Phone className="w-4 h-4 text-[#0284c7]" /> Patient Communication
+                    <Phone className="w-4 h-4 text-[#0AA8DE]" /> Patient Communication
                   </h3>
                   <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
                     Sending appointment confirmations, pre-procedure instructions, post-treatment care advice, and responses to your inquiries.
@@ -110,7 +110,7 @@ export default function PrivacyPolicyPage() {
                 </div>
                 <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/60">
                   <h3 className="font-semibold text-sm text-[#0f2942] mb-1.5 flex items-center gap-2">
-                    <Lock className="w-4 h-4 text-[#0284c7]" /> Emergency Response
+                    <Lock className="w-4 h-4 text-[#0AA8DE]" /> Emergency Response
                   </h3>
                   <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
                     Contacting patients or designated emergency contacts in acute dental or medical situations during clinical treatment.
@@ -118,7 +118,7 @@ export default function PrivacyPolicyPage() {
                 </div>
                 <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/60">
                   <h3 className="font-semibold text-sm text-[#0f2942] mb-1.5 flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-[#0284c7]" /> Statutory Compliance
+                    <ShieldCheck className="w-4 h-4 text-[#0AA8DE]" /> Statutory Compliance
                   </h3>
                   <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
                     Complying with the Dental Council of India (DCI), state health authorities, and Indian medical record retention requirements.
@@ -130,7 +130,7 @@ export default function PrivacyPolicyPage() {
             {/* Confidentiality & Security */}
             <div>
               <h2 className="text-xl sm:text-2xl font-bold text-[#0f2942] mb-4 flex items-center gap-2.5">
-                <span className="w-2 h-6 bg-[#0284c7] rounded-full inline-block" />
+                <span className="w-2 h-6 bg-[#E71B1E] rounded-full inline-block" />
                 4. Confidentiality & Data Security
               </h2>
               <p className="text-slate-600 leading-relaxed text-sm sm:text-base">
@@ -141,7 +141,7 @@ export default function PrivacyPolicyPage() {
             {/* Sharing of Information */}
             <div>
               <h2 className="text-xl sm:text-2xl font-bold text-[#0f2942] mb-4 flex items-center gap-2.5">
-                <span className="w-2 h-6 bg-[#0284c7] rounded-full inline-block" />
+                <span className="w-2 h-6 bg-[#E71B1E] rounded-full inline-block" />
                 5. Information Sharing
               </h2>
               <p className="text-slate-600 leading-relaxed text-sm sm:text-base">
@@ -157,11 +157,11 @@ export default function PrivacyPolicyPage() {
             {/* Patient Rights */}
             <div>
               <h2 className="text-xl sm:text-2xl font-bold text-[#0f2942] mb-4 flex items-center gap-2.5">
-                <span className="w-2 h-6 bg-[#0284c7] rounded-full inline-block" />
+                <span className="w-2 h-6 bg-[#E71B1E] rounded-full inline-block" />
                 6. Your Rights
               </h2>
               <p className="text-slate-600 leading-relaxed text-sm sm:text-base">
-                As a patient, you have the right to request a copy of your clinical treatment records and X-rays, update inaccurate contact details, and inquire about how your data is being handled. You may contact our clinic administration at any time to exercise these rights.
+                As a patient, you have the right to request a copy of your clinical treatment records and X-rays, update inaccurate contact details, and inquire about how your data is being handled. You may contact our hospital administration at any time to exercise these rights.
               </p>
             </div>
 
@@ -175,16 +175,16 @@ export default function PrivacyPolicyPage() {
               </p>
               <div className="space-y-2 text-sm text-slate-700">
                 <p className="flex items-center gap-2">
-                  <MapPin className="w-4 h-4 text-[#0284c7] shrink-0" />
-                  <span>3rd Cross St, opposite GMC Balayogi Stadium, Zicria Nagar, Yanam, Andhra Pradesh 533464</span>
+                  <MapPin className="w-4 h-4 text-[#E71B1E] shrink-0" />
+                  <span>CHOWDARY GUEST HOUSE, GROUND FLOOR, NEAR RTC COLONY 4 ROAD JUNCTION, ROAD, NEAR KAVERI BUS PARKING, Ramanayapeta, Ramanayyapeta, Andhra Pradesh 533005</span>
                 </p>
                 <p className="flex items-center gap-2">
-                  <Phone className="w-4 h-4 text-[#0284c7] shrink-0" />
-                  <span>098853 49798 / 087903 49798</span>
+                  <Phone className="w-4 h-4 text-[#E71B1E] shrink-0" />
+                  <span>088859 99857</span>
                 </p>
                 <p className="flex items-center gap-2">
-                  <Mail className="w-4 h-4 text-[#0284c7] shrink-0" />
-                  <span>VRdental.yanam@gmail.com</span>
+                  <Mail className="w-4 h-4 text-[#E71B1E] shrink-0" />
+                  <span>sameekshadentalhospital@gmail.com</span>
                 </p>
               </div>
             </div>

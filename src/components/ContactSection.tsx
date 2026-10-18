@@ -25,9 +25,9 @@ function ContactCard({ icon: Icon, title, details }: ContactCardProps) {
   return (
     <motion.div
       whileHover={{ y: -4 }}
-      className="p-5 rounded-[18px] border transition-all duration-300 flex items-start gap-4 bg-white border-borders/50 shadow-sm hover:shadow-md hover:border-primary/10"
+      className="p-5 rounded-[18px] border transition-all duration-300 flex items-start gap-4 bg-white border-borders/60 shadow-sm hover:shadow-md hover:border-[#E71B1E]/30"
     >
-      <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 bg-primary/5 text-primary">
+      <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 bg-[#E71B1E]/10 text-[#E71B1E]">
         <Icon className="w-5 h-5" />
       </div>
       <div className="flex flex-col text-left">
@@ -36,15 +36,15 @@ function ContactCard({ icon: Icon, title, details }: ContactCardProps) {
         </span>
         {title === "Email" ? (
           <a
-            href="mailto:VRdental.yanam@gmail.com"
-            className="text-sm font-semibold text-dark-text mt-1 hover:text-primary transition-colors"
+            href="mailto:sameekshadentalhospital@gmail.com"
+            className="text-sm font-semibold text-dark-text mt-1 hover:text-[#E71B1E] transition-colors"
           >
             {details}
           </a>
         ) : title === "Reception & Booking" ? (
           <a
-            href="tel:09885349798"
-            className="text-sm font-semibold text-dark-text mt-1 hover:text-primary transition-colors"
+            href="tel:08885999857"
+            className="text-sm font-semibold text-dark-text mt-1 hover:text-[#E71B1E] transition-colors"
           >
             {details}
           </a>
@@ -90,18 +90,18 @@ export default function ContactSection() {
         
         {/* Section Heading */}
         <div className="flex flex-col items-center text-center max-w-2xl mx-auto mb-20">
-          <span className="text-sm font-bold text-primary uppercase tracking-widest mb-3">
+          <span className="text-sm font-bold text-[#E71B1E] uppercase tracking-widest mb-3">
             Appointment Booking
           </span>
           <h2 className="font-heading font-extrabold text-3xl md:text-[48px] text-dark-text tracking-tight leading-tight">
             Book Your Dental Appointment
           </h2>
-          <div className="h-[3px] w-12 bg-primary rounded-full mt-6" />
+          <div className="h-[3.5px] w-14 bg-[#0AA8DE] rounded-full mt-6" />
         </div>
 
         {/* Form Container */}
         <div className="max-w-[800px] mx-auto w-full mb-24">
-          <div className="rounded-[28px] p-8 md:p-12 bg-white border border-borders/60 shadow-xl shadow-primary/[0.01] relative min-h-[580px] flex flex-col justify-center">
+          <div className="rounded-[28px] p-8 md:p-12 bg-white border border-[#E71B1E]/20 shadow-xl shadow-[#E71B1E]/5 relative min-h-[580px] flex flex-col justify-center">
               
               <AnimatePresence mode="wait">
                 {!isSubmitted ? (
@@ -129,7 +129,7 @@ export default function ContactSection() {
                           id="fullName"
                           type="text"
                           placeholder="e.g. Rahul Verma"
-                          className={`w-full h-14 px-5 rounded-2xl bg-[#F8FAFC] border text-sm font-semibold focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all duration-300 ${
+                          className={`w-full h-14 px-5 rounded-2xl bg-[#F8FAFC] border text-sm font-semibold focus:border-[#E71B1E] focus:ring-4 focus:ring-[#E71B1E]/15 transition-all duration-300 ${
                             errors.fullName ? "border-red-500" : "border-borders/60"
                           }`}
                           {...register("fullName", { required: "Full name is required" })}
@@ -148,7 +148,7 @@ export default function ContactSection() {
                           id="phone"
                           type="tel"
                           placeholder="10-digit mobile number"
-                          className={`w-full h-14 px-5 rounded-2xl bg-[#F8FAFC] border text-sm font-semibold focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all duration-300 ${
+                          className={`w-full h-14 px-5 rounded-2xl bg-[#F8FAFC] border text-sm font-semibold focus:border-[#E71B1E] focus:ring-4 focus:ring-[#E71B1E]/15 transition-all duration-300 ${
                             errors.phone ? "border-red-500" : "border-borders/60"
                           }`}
                           {...register("phone", {
@@ -170,7 +170,7 @@ export default function ContactSection() {
                           id="email"
                           type="email"
                           placeholder="e.g. rahul@example.com"
-                          className={`w-full h-14 px-5 rounded-2xl bg-[#F8FAFC] border text-sm font-semibold focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all duration-300 ${
+                          className={`w-full h-14 px-5 rounded-2xl bg-[#F8FAFC] border text-sm font-semibold focus:border-[#E71B1E] focus:ring-4 focus:ring-[#E71B1E]/15 transition-all duration-300 ${
                             errors.email ? "border-red-500" : "border-borders/60"
                           }`}
                           {...register("email", {
@@ -191,7 +191,7 @@ export default function ContactSection() {
                         <input
                           id="date"
                           type="date"
-                          className={`w-full h-14 px-5 rounded-2xl bg-[#F8FAFC] border text-sm font-semibold focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all duration-300 ${
+                          className={`w-full h-14 px-5 rounded-2xl bg-[#F8FAFC] border text-sm font-semibold focus:border-[#E71B1E] focus:ring-4 focus:ring-[#E71B1E]/15 transition-all duration-300 ${
                             errors.date ? "border-red-500" : "border-borders/60"
                           }`}
                           {...register("date", { required: "Please select a date" })}
@@ -209,7 +209,7 @@ export default function ContactSection() {
                         <input
                           id="time"
                           type="time"
-                          className={`w-full h-14 px-5 rounded-2xl bg-[#F8FAFC] border text-sm font-semibold focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all duration-300 ${
+                          className={`w-full h-14 px-5 rounded-2xl bg-[#F8FAFC] border text-sm font-semibold focus:border-[#E71B1E] focus:ring-4 focus:ring-[#E71B1E]/15 transition-all duration-300 ${
                             errors.time ? "border-red-500" : "border-borders/60"
                           }`}
                           {...register("time", { required: "Please select a time slot" })}
@@ -226,7 +226,7 @@ export default function ContactSection() {
                         </label>
                         <select
                           id="service"
-                          className={`w-full h-14 px-5 rounded-2xl bg-[#F8FAFC] border text-sm font-semibold focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all duration-300 ${
+                          className={`w-full h-14 px-5 rounded-2xl bg-[#F8FAFC] border text-sm font-semibold focus:border-[#E71B1E] focus:ring-4 focus:ring-[#E71B1E]/15 transition-all duration-300 ${
                             errors.service ? "border-red-500" : "border-borders/60"
                           }`}
                           defaultValue=""
@@ -257,7 +257,7 @@ export default function ContactSection() {
                           id="message"
                           rows={3}
                           placeholder="Describe any symptoms, pain location, cosmetic goals, or questions..."
-                          className="w-full p-5 rounded-2xl bg-[#F8FAFC] border border-borders/60 text-sm font-semibold focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all duration-300 resize-none animate-none"
+                          className="w-full p-5 rounded-2xl bg-[#F8FAFC] border border-borders/60 text-sm font-semibold focus:border-[#E71B1E] focus:ring-4 focus:ring-[#E71B1E]/15 transition-all duration-300 resize-none animate-none"
                           {...register("message")}
                         />
                       </div>
@@ -267,7 +267,7 @@ export default function ContactSection() {
                         <button
                           type="submit"
                           disabled={isSubmitting}
-                          className="w-full h-14 bg-primary hover:bg-[#066bbd] text-white font-bold text-base rounded-2xl shadow-lg shadow-primary/15 hover:shadow-xl hover:shadow-primary/25 transition-all duration-300 flex items-center justify-center gap-2.5 disabled:opacity-75 cursor-pointer hover:-translate-y-0.5 active:translate-y-0"
+                          className="w-full h-14 bg-[#E71B1E] hover:bg-[#c41215] text-white font-bold text-base rounded-2xl shadow-lg shadow-[#E71B1E]/25 hover:shadow-xl hover:shadow-[#E71B1E]/35 transition-all duration-300 flex items-center justify-center gap-2.5 disabled:opacity-75 cursor-pointer hover:-translate-y-0.5 active:translate-y-0"
                         >
                           {isSubmitting ? (
                             <span className="w-5 h-5 rounded-full border-2 border-white border-t-transparent animate-spin" />
@@ -281,8 +281,8 @@ export default function ContactSection() {
                         
                         <div className="flex items-center justify-center gap-2 text-sm text-gray-text font-medium">
                           <span>Or call directly:</span>
-                          <a href="tel:09885349798" className="text-primary font-bold hover:underline">
-                            Call 098853 49798
+                          <a href="tel:08885999857" className="text-[#E71B1E] font-bold hover:underline">
+                            Call 088859 99857
                           </a>
                         </div>
                       </div>
@@ -305,11 +305,11 @@ export default function ContactSection() {
                     </h3>
                     
                     <p className="text-base text-gray-text max-w-md leading-relaxed font-normal mb-8">
-                      Thank you for choosing V.R. Dental Care & Dental Implant Centre. Our clinical team has received your request and will call you back at your provided phone number to confirm your slot.
+                      Thank you for choosing Sameeksha Super Speciality Dental Hospital & Implant Centre. Our clinical team has received your request and will call you back at your provided phone number to confirm your slot.
                     </p>
                     
                     <div className="p-4 rounded-2xl bg-slate-50 border border-borders/60 flex items-center gap-3 text-left w-full max-w-sm mb-8">
-                      <Calendar className="w-5 h-5 text-primary shrink-0" />
+                      <Calendar className="w-5 h-5 text-[#0AA8DE] shrink-0" />
                       <span className="text-xs md:text-sm font-semibold text-dark-text">
                         A confirmation SMS and email summary have been sent.
                       </span>
@@ -343,8 +343,8 @@ export default function ContactSection() {
             className="lg:col-span-8 w-full rounded-[24px] overflow-hidden shadow-[0_15px_50px_rgba(15,23,42,0.05)] border border-borders relative h-[450px]"
           >
             <iframe
-              title="V.R. Dental Care & Dental Implant Centre Map Location"
-              src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3826.969176378418!2d82.21557007579178!3d16.728224521453205!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3a381fed6dbf3fbf%3A0xe54e60e86b404d03!2sGMC%20Balayogi%20Stadium!5e0!3m2!1sen!2sin!4v1700000000000!5m2!1sen!2sin"
+              title="Sameeksha Super Speciality Dental Hospital Map Location"
+              src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3815.485122046467!2d82.2355!3d16.9855!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3a38284c1b2f7cdd%3A0x3f1c7f81af5eb93e!2sSameeksha%20Dental%20Hospital!5e0!3m2!1sen!2sin!4v1700000000000!5m2!1sen!2sin"
               className="absolute inset-0 w-full h-full border-none"
               loading="lazy"
               referrerPolicy="no-referrer-when-downgrade"
@@ -355,18 +355,18 @@ export default function ContactSection() {
           <div className="lg:col-span-4 w-full flex flex-col gap-5 text-left">
             <ContactCard
               icon={MapPin}
-              title="Clinic Address"
-              details="3rd Cross St, opposite GMC Balayogi Stadium, Zicria Nagar, Zicriya Nagar, Yanam, Andhra Pradesh 533464"
+              title="Hospital Address"
+              details="CHOWDARY GUEST HOUSE, GROUND FLOOR, NEAR RTC COLONY 4 ROAD JUNCTION, ROAD, NEAR KAVERI BUS PARKING, Ramanayapeta, Ramanayyapeta, Andhra Pradesh 533005"
             />
             <ContactCard
               icon={Phone}
               title="Reception & Booking"
-              details="098853 49798"
+              details="088859 99857"
             />
             <ContactCard
               icon={Mail}
               title="Email"
-              details="VRdental.yanam@gmail.com"
+              details="sameekshadentalhospital@gmail.com"
             />
             <ContactCard
               icon={Clock}

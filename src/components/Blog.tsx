@@ -46,14 +46,14 @@ export default function Blog() {
       <div className="max-w-[1440px] mx-auto px-6 md:px-12">
         {/* Header */}
         <div className="flex flex-col items-center text-center max-w-2xl mx-auto mb-16">
-          <span className="text-sm font-bold text-primary uppercase tracking-widest mb-3 flex items-center gap-1.5">
-            <BookOpen className="w-4 h-4" />
+          <span className="text-sm font-extrabold text-[#E71B1E] uppercase tracking-widest mb-3 flex items-center gap-1.5">
+            <BookOpen className="w-4 h-4 text-[#E71B1E]" />
             Dental Health Blog
           </span>
           <h2 className="font-heading font-extrabold text-3xl md:text-[48px] text-dark-text tracking-tight leading-tight">
             Dental Health & Insights
           </h2>
-          <div className="h-[3px] w-12 bg-primary rounded-full mt-6" />
+          <div className="h-1 w-16 bg-[#0AA8DE] rounded-full mt-6" />
         </div>
 
         {/* Articles Grid */}
@@ -66,7 +66,7 @@ export default function Blog() {
               viewport={{ once: true, margin: "-50px" }}
               transition={{ duration: 0.6, delay: Math.min(idx * 0.1, 0.4), ease: "easeOut" }}
               whileHover={{ y: -6 }}
-              className="group rounded-3xl bg-white border border-borders/50 overflow-hidden shadow-lg shadow-primary/[0.01] hover:shadow-xl hover:shadow-primary/5 transition-all duration-300 flex flex-col justify-between cursor-pointer"
+              className="group rounded-3xl bg-white border border-borders/50 hover:border-[#E71B1E] overflow-hidden shadow-lg shadow-[#E71B1E]/[0.03] hover:shadow-xl hover:shadow-[#E71B1E]/10 transition-all duration-300 flex flex-col justify-between cursor-pointer"
             >
               <div>
                 {/* Image Container with zoom */}
@@ -79,14 +79,14 @@ export default function Blog() {
                     sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
                   />
                   {/* Category Pill */}
-                  <span className="absolute top-4 left-4 text-[9px] font-extrabold bg-white/90 backdrop-blur-sm text-primary px-3 py-1 rounded-full uppercase tracking-wider shadow-sm border border-white/40">
+                  <span className="absolute top-4 left-4 text-[9px] font-extrabold bg-[#E71B1E] text-white px-3 py-1 rounded-full uppercase tracking-wider shadow-sm">
                     {article.category}
                   </span>
                 </div>
 
                 {/* Card Content */}
                 <div className="p-6 md:p-8 text-left">
-                  <h3 className="font-heading font-extrabold text-lg md:text-xl text-dark-text tracking-tight mb-3 leading-snug group-hover:text-primary transition-colors duration-200">
+                  <h3 className="font-heading font-extrabold text-lg md:text-xl text-dark-text tracking-tight mb-3 leading-snug group-hover:text-[#E71B1E] transition-colors duration-200">
                     {article.title}
                   </h3>
                   <p className="text-gray-text text-sm leading-relaxed font-normal">
@@ -97,9 +97,9 @@ export default function Blog() {
 
               {/* Card Footer Action */}
               <div className="px-6 md:px-8 pb-6 md:pb-8 pt-0 flex justify-start">
-                <button className="text-sm font-bold text-primary group-hover:text-secondary flex items-center gap-1.5 transition-colors duration-200">
+                <button className="text-sm font-bold text-[#E71B1E] group-hover:text-[#c41215] flex items-center gap-1.5 transition-colors duration-200">
                   <span>Read Article</span>
-                  <ArrowRight className="w-4 h-4 transform translate-x-0 group-hover:translate-x-1.5 transition-transform duration-200" />
+                  <ArrowRight className="w-4 h-4 text-[#0AA8DE] transform translate-x-0 group-hover:translate-x-1.5 transition-transform duration-200" />
                 </button>
               </div>
             </motion.div>

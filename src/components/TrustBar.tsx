@@ -69,7 +69,7 @@ function CountUp({ to, duration = 2 }: { to: number; duration?: number }) {
 export default function TrustBar() {
   return (
     <section className="w-full relative z-20 px-3.5 sm:px-6 md:px-12 -mt-10 max-w-[1440px] mx-auto overflow-hidden">
-      <div className="w-full grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 p-3.5 sm:p-6 md:p-8 rounded-3xl bg-white shadow-xl shadow-primary/5 border border-borders/60">
+      <div className="w-full grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 p-3.5 sm:p-6 md:p-8 rounded-3xl bg-white shadow-xl shadow-[#E71B1E]/10 border border-[#E71B1E]/20">
         {STATS.map((stat, idx) => {
           const IconComponent = stat.icon;
           return (
@@ -84,19 +84,19 @@ export default function TrustBar() {
                 idx !== STATS.length - 1 ? "lg:border-r border-borders/60" : ""
               }`}
             >
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-primary/5 text-primary flex items-center justify-center shrink-0">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-[#E71B1E]/10 text-[#E71B1E] flex items-center justify-center shrink-0">
                 <IconComponent className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
               <div className="flex flex-col items-center sm:items-start min-w-0 w-full">
                 <div className="font-heading font-extrabold text-xl sm:text-2xl md:text-3xl text-dark-text tracking-tight flex items-baseline whitespace-nowrap">
                   {stat.id === 4 ? (
                     <span>
-                      24<span className="text-secondary text-base sm:text-lg font-semibold mx-0.5">×</span>7
+                      24<span className="text-[#0AA8DE] text-base sm:text-lg font-bold mx-0.5">×</span>7
                     </span>
                   ) : (
                     <>
                       <CountUp to={stat.value} />
-                      <span className="text-secondary ml-0.5">{stat.suffix}</span>
+                      <span className="text-[#0AA8DE] font-extrabold ml-0.5">{stat.suffix}</span>
                     </>
                   )}
                 </div>

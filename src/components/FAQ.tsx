@@ -48,11 +48,19 @@ function AccordionItem({ question, answer, isOpen, onClick }: FAQItem & { isOpen
     <div className="border-b border-borders/60 last:border-none py-5">
       <button
         onClick={onClick}
-        className="w-full flex items-center justify-between text-left gap-4 font-heading font-extrabold text-base md:text-lg text-dark-text hover:text-primary transition-colors duration-200 cursor-pointer"
+        className={`w-full flex items-center justify-between text-left gap-4 font-heading font-extrabold text-base md:text-lg transition-colors duration-200 cursor-pointer ${
+          isOpen ? "text-[#E71B1E]" : "text-dark-text hover:text-[#E71B1E]"
+        }`}
       >
         <span>{question}</span>
-        <div className="w-8 h-8 rounded-full bg-slate-50 border border-borders/40 flex items-center justify-center shrink-0 text-gray-text group-hover:text-primary transition-all duration-200">
-          {isOpen ? <Minus className="w-4 h-4 text-primary" /> : <Plus className="w-4 h-4" />}
+        <div
+          className={`w-8 h-8 rounded-full border flex items-center justify-center shrink-0 transition-all duration-200 ${
+            isOpen
+              ? "bg-[#E71B1E] border-[#E71B1E] text-white shadow-sm shadow-[#E71B1E]/30"
+              : "bg-slate-50 border-borders/40 text-gray-text hover:border-[#E71B1E] hover:text-[#E71B1E]"
+          }`}
+        >
+          {isOpen ? <Minus className="w-4 h-4 text-white" /> : <Plus className="w-4 h-4" />}
         </div>
       </button>
       
@@ -84,12 +92,13 @@ export default function FAQ() {
         
         {/* Left Column: Heading */}
         <div className="lg:col-span-5 flex flex-col items-start text-left">
-          <span className="text-sm font-bold text-primary uppercase tracking-widest mb-3">
+          <span className="text-sm font-bold text-[#E71B1E] uppercase tracking-widest mb-3">
             FAQ
           </span>
-          <h2 className="font-heading font-extrabold text-3xl md:text-[48px] text-dark-text tracking-tight leading-tight mb-6">
+          <h2 className="font-heading font-extrabold text-3xl md:text-[48px] text-dark-text tracking-tight leading-tight mb-4">
             Frequently Asked Dental Questions
           </h2>
+          <div className="h-[3.5px] w-14 bg-[#0AA8DE] rounded-full mb-6" />
           <p className="text-gray-text text-base md:text-lg font-normal leading-relaxed mb-8">
             Can&apos;t find the answer you&apos;re looking for? Reach out to our front desk team at any time. We are here to assist you with scheduling, clinical questions, or payment support.
           </p>
@@ -105,7 +114,7 @@ export default function FAQ() {
                 window.scrollTo({ top: Math.max(0, targetPosition), behavior: "smooth" });
               }
             }}
-            className="px-6 py-3 border border-primary/20 hover:border-primary text-primary text-sm font-bold rounded-full transition-all duration-300 hover:bg-primary/5 cursor-pointer"
+            className="px-6 py-3 border-2 border-[#E71B1E] bg-white hover:bg-[#E71B1E] text-[#E71B1E] hover:text-white text-sm font-bold rounded-full transition-all duration-300 shadow-sm cursor-pointer"
           >
             Ask a Specific Question
           </a>

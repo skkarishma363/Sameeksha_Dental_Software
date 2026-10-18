@@ -66,13 +66,13 @@ export default function WhyChooseUs() {
       <div className="max-w-[1440px] mx-auto px-6 md:px-12 text-center">
         {/* Header */}
         <div className="flex flex-col items-center max-w-2xl mx-auto mb-16">
-          <span className="text-sm font-bold text-primary uppercase tracking-widest mb-3">
+          <span className="text-sm font-bold text-[#E71B1E] uppercase tracking-widest mb-3">
             Why Choose Us
           </span>
           <h2 className="font-heading font-extrabold text-3xl md:text-[48px] text-dark-text tracking-tight leading-tight">
             Setting the Benchmark for Smile Excellence
           </h2>
-          <div className="h-[3px] w-12 bg-primary rounded-full mt-6" />
+          <div className="h-[3.5px] w-14 bg-[#0AA8DE] rounded-full mt-6" />
         </div>
 
         {/* Card Grid */}
@@ -90,18 +90,18 @@ export default function WhyChooseUs() {
                 key={card.id}
                 variants={cardVariants}
                 whileHover={{ y: -8, scale: 1.01 }}
-                className="relative group rounded-3xl p-8 bg-white border border-borders/60 shadow-lg shadow-primary/[0.02] hover:shadow-xl hover:shadow-primary/5 transition-all duration-300 flex flex-col items-start text-left overflow-hidden cursor-pointer"
+                className="relative group rounded-3xl p-8 bg-white border border-borders/60 shadow-lg shadow-[#E71B1E]/5 hover:border-[#E71B1E]/40 hover:shadow-xl hover:shadow-[#E71B1E]/15 transition-all duration-300 flex flex-col items-start text-left overflow-hidden cursor-pointer"
               >
                 {/* Glowing Corner Hover Effect */}
-                <div className="absolute inset-0 bg-gradient-to-tr from-primary/[0.02] to-secondary/[0.02] opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                <div className="absolute inset-0 bg-gradient-to-tr from-[#E71B1E]/5 to-[#0AA8DE]/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
                 {/* Card Icon */}
-                <div className="w-14 h-14 rounded-2xl bg-primary/5 text-primary flex items-center justify-center mb-6 group-hover:bg-primary group-hover:text-white transition-all duration-300 relative z-10 shadow-sm shadow-primary/5">
+                <div className="w-14 h-14 rounded-2xl bg-[#E71B1E]/10 text-[#E71B1E] flex items-center justify-center mb-6 group-hover:bg-[#E71B1E] group-hover:text-white transition-all duration-300 relative z-10 shadow-sm shadow-[#E71B1E]/10">
                   <Icon className="w-6 h-6" />
                 </div>
 
                 {/* Card Title */}
-                <h3 className="font-heading font-extrabold text-xl text-dark-text tracking-tight mb-3 relative z-10 group-hover:text-primary transition-colors duration-200">
+                <h3 className="font-heading font-extrabold text-xl text-dark-text tracking-tight mb-3 relative z-10 group-hover:text-[#E71B1E] transition-colors duration-200">
                   {card.title}
                 </h3>
 

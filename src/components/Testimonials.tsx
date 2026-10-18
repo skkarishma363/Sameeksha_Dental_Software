@@ -2,59 +2,41 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
-import { Star } from "lucide-react";
+import { Star, StarHalf } from "lucide-react";
 import { getAssetPath } from "@/lib/getAssetPath";
 
 interface TestimonialCardData {
   id: number;
   name: string;
   avatar: string;
+  rating: number;
   quote: string;
-  objectPosition?: string;
 }
 
 const TESTIMONIALS_DATA: TestimonialCardData[] = [
   {
     id: 1,
-    name: "Srinivas rao",
+    name: "K Ksrkraju",
     avatar: "/figma/avatar_srinivas.png",
+    rating: 4.5,
     quote:
-      "Dr. Praveen and the team at V R Dental Care, Yanam are absolutely fantastic! They always make me feel comfortable during procedures, clearly explain treatment options, and are genuinely friendly. I highly recommend them for anyone looking for a caring and skilled dental practice.",
+      "Highly recommended for dental care.\n\nI recently had a root canal treatment done here, and it was a smooth experience. The hospital maintains excellent hygiene, and all the tools used by the staff were completely clean and sanitized.\n\nThe staff is incredibly friendly and cooperative, which makes you feel right at ease. A special shout-out to the doctor, who took the time to explain the entire procedure so patiently. Overall, a great experience—giving it a solid 4.5 out of 5.",
   },
   {
     id: 2,
-    name: "Bonam Bhargav",
+    name: "Dyva Kumari Ranganadham",
     avatar: "/figma/avatar_bhargav.png",
+    rating: 5,
     quote:
-      "I had a great experience at VR Dental Clinic! The staff was very friendly and professional, and the doctors took the time to explain everything clearly. The clinic is well-maintained, and the treatment was smooth and painless. I highly recommend VR Dental Clinic for anyone looking for quality dental care.",
+      "Had a really good experience here. Got my scaling, root planing, and wisdom tooth extraction done at Sameeksha Multi Speciality Hospital. The dentist was patient, gentle, and explained everything clearly so there were no surprises. Everything was hygienic and well-organized, and my recovery has been very smooth. Highly recommend this place to anyone needing dental work.",
   },
   {
     id: 3,
-    name: "Pampana Valibaba",
+    name: "Dyva Kumari Ranganadham",
     avatar: "/figma/avatar_valibaba.png",
+    rating: 5,
     quote:
-      "Experienced , skilled Doctors are working with all latest equipment. Dr. Praveen care and treatment is very nice in all aspects. V.R. is the best Dental Care in YANAM.",
-  },
-  {
-    id: 4,
-    name: "K. Satyanarayana",
-    avatar: "/figma/avatar_satyanarayana.jpg",
-    quote:
-      "Got dental implant treatment done by Dr. Praveen. The procedure was completed with utmost precision and care. Very hygienic clinic with state-of-the-art equipment. Truly the top dental clinic in Yanam!",
-  },
-  {
-    id: 5,
-    name: "M. Durga Prasad",
-    avatar: "/figma/avatar_durgaprasad.jpg",
-    quote:
-      "Visited for root canal treatment and crown placement. The doctor explained every step patiently and the treatment was completely painless. Exceptional service and very reasonable pricing.",
-  },
-  {
-    id: 6,
-    name: "V. Lakshmi",
-    avatar: "/figma/avatar_lakshmi.jpg",
-    quote:
-      "Very polite staff and excellent treatment by Dr. Praveen. Clean and modern clinic environment. Best place for all dental and cosmetic teeth alignment needs in Yanam.",
+      "I had a very positive experience with Dr. Suvarna Raju, who demonstrated exceptional patience and a gentle approach while treating patients. The entire treatment process was handled smoothly and comfortably, with great care taken to ensure it was virtually pain-free. Dr. Suvarna Raju’s polite attitude and reasonable treatment costs are truly commendable.\n\nI am highly satisfied with the treatment received. The clinic also provides excellent patient care and follow-up services. The reception team was very attentive, making post-treatment verification calls to check on my well-being, which reflects their dedication to patient satisfaction.",
   },
 ];
 
@@ -146,7 +128,7 @@ export default function Testimonials() {
   return (
     <section
       id="testimonials"
-      className="py-20 lg:py-28 relative overflow-hidden bg-[#f2f7fb]"
+      className="py-20 lg:py-28 relative overflow-hidden bg-[#f0f9fc]"
     >
       {/* Large subtle white decorative circle on right side */}
       <div className="absolute -right-20 top-1/2 -translate-y-1/2 w-[700px] h-[700px] rounded-full border-[100px] border-white/60 pointer-events-none select-none z-0" />
@@ -155,12 +137,12 @@ export default function Testimonials() {
         
         {/* Header (Top Left Aligned) */}
         <div className="max-w-xl text-left mb-12 lg:mb-14">
-          {/* Label with blue underline under TESTIMONIALS */}
+          {/* Label with accent blue underline under TESTIMONIALS */}
           <div className="mb-3">
             <span className="relative inline-block text-xs md:text-sm font-bold tracking-[0.16em] uppercase pb-1 text-[#0f2942]">
-              <span className="relative text-[#0284c7]">
+              <span className="relative text-[#E71B1E]">
                 TESTIMONIALS
-                <span className="absolute bottom-0 left-0 w-full h-[2.5px] bg-[#0284c7] rounded-full" />
+                <span className="absolute bottom-0 left-0 w-full h-[2.5px] bg-[#0AA8DE] rounded-full" />
               </span>
             </span>
           </div>
@@ -168,7 +150,7 @@ export default function Testimonials() {
           {/* Heading */}
           <h2 className="text-3xl sm:text-4xl lg:text-[42px] font-extrabold text-[#0f2942] tracking-tight leading-[1.18]">
             Smiles That Speak for<br />
-            <span className="text-[#0284c7]">Themselves</span>
+            <span className="text-[#E71B1E]">Themselves</span>
           </h2>
         </div>
 
@@ -195,21 +177,25 @@ export default function Testimonials() {
                 key={`${item.id}-${idx}`}
                 className="w-full md:w-1/2 lg:w-1/3 px-3 shrink-0 flex"
               >
-                <div className="w-full bg-white rounded-2xl p-6 sm:p-7 shadow-[0_8px_30px_rgba(15,23,42,0.04)] border border-slate-100 flex flex-col justify-between text-left hover:shadow-lg transition-shadow duration-300 h-full">
-                  {/* Review Quote */}
-                  <p className="text-xs sm:text-[13px] text-slate-600 leading-relaxed font-normal mb-8">
-                    {item.quote}
-                  </p>
+                <div className="w-full bg-white rounded-2xl p-6 sm:p-7 shadow-[0_8px_30px_rgba(231,27,30,0.06)] border border-[#E71B1E]/20 hover:border-[#E71B1E] flex flex-col justify-between text-left hover:shadow-xl transition-all duration-300 h-full relative group">
+                  {/* Accent bar & Review Quote */}
+                  <div>
+                    <div className="w-8 h-1 bg-[#E71B1E] rounded-full mb-3" />
+                    <div className="space-y-2 sm:space-y-2.5 text-xs sm:text-[13px] text-slate-600 leading-relaxed font-normal mb-6">
+                      {item.quote.split("\n\n").map((para, pIdx) => (
+                        <p key={pIdx}>{para}</p>
+                      ))}
+                    </div>
+                  </div>
 
                   {/* Author & Rating */}
-                  <div className="flex items-center gap-3.5 pt-4 border-t border-slate-100/80">
-                    <div className="relative w-11 h-11 rounded-full overflow-hidden shrink-0 border border-slate-200">
+                  <div className="flex items-center gap-3.5 pt-4 border-t border-slate-100">
+                    <div className="relative w-11 h-11 rounded-full overflow-hidden shrink-0 border-2 border-[#0AA8DE]">
                       <Image
                         src={getAssetPath(item.avatar)}
                         alt={item.name}
                         fill
                         className="object-cover"
-                        style={{ objectPosition: item.objectPosition || "center" }}
                         unoptimized
                       />
                     </div>
@@ -217,11 +203,38 @@ export default function Testimonials() {
                       <h4 className="font-bold text-sm text-[#0f2942] leading-tight">
                         {item.name}
                       </h4>
-                      {/* 5 Yellow Stars */}
-                      <div className="flex text-amber-400 gap-0.5 mt-1">
-                        {[...Array(5)].map((_, i) => (
-                          <Star key={i} className="w-3.5 h-3.5 fill-current" />
-                        ))}
+                      {/* Rating Stars */}
+                      <div
+                        className="flex text-[#E71B1E] gap-0.5 mt-1 items-center"
+                        aria-label={`${item.rating} out of 5 stars`}
+                      >
+                        {[1, 2, 3, 4, 5].map((star) => {
+                          if (item.rating >= star) {
+                            return (
+                              <Star
+                                key={star}
+                                className="w-3.5 h-3.5 fill-current stroke-current"
+                              />
+                            );
+                          } else if (item.rating >= star - 0.5) {
+                            return (
+                              <div
+                                key={star}
+                                className="relative w-3.5 h-3.5 inline-block"
+                              >
+                                <Star className="w-3.5 h-3.5 fill-none stroke-current" />
+                                <StarHalf className="w-3.5 h-3.5 fill-current stroke-current absolute top-0 left-0" />
+                              </div>
+                            );
+                          } else {
+                            return (
+                              <Star
+                                key={star}
+                                className="w-3.5 h-3.5 fill-none stroke-current opacity-30"
+                              />
+                            );
+                          }
+                        })}
                       </div>
                     </div>
                   </div>
@@ -234,10 +247,10 @@ export default function Testimonials() {
         {/* Bottom Center "View All" Button */}
         <div className="mt-12 lg:mt-14 text-center">
           <a
-            href="https://www.google.com/search?q=vr+dental+clinic+yanam&rlz=1C1ONGR_en-GBIN1218IN1220&oq=vr+dental&gs_lcrp=EgZjaHJvbWUqBggCEEUYOzIGCAAQRRg5MgYIARBFGDsyBggCEEUYOzIHCAMQABiABDIHCAQQABiABDINCAUQLhivARjHARiABDINCAcQLhivARjHARiABDINCAgQLhivARjHARiABDINCAkQLhivARjHARiABNIBCDU3ODZqMGo3qAIAsAIA&sourceid=chrome&source=chrome.ob&ie=UTF-8#lrd=0x3a37f5629e08049d:0x57e44639afd7d3a6,1,,,,"
+            href="https://www.google.com/search?q=sameeksha+dental+hospital&rlz=1C1ONGR_en-GBIN1218IN1220&sca_esv=306360304c71a31f&biw=1707&bih=862&sxsrf=APpeQnteMVAGiiKtFfm7oUsm6Rdhk8sqMA%3A1789897198193&ei=7qmvaoynC4-UseMPm96-0A8&gs_ssp=eJzj4tVP1zc0TKoqSUmqTK4wYLRSNagwTjS2MLIwSTZMMkozT05JsTKoME4zTDZPszBMTDNNTbI0TvWSLE7MTU3NLs5IVEhJzStJzFHIyC8uyCxJzAEA97IaSA&oq=sameeksha+&gs_lp=Egxnd3Mtd2l6LXNlcnAiCnNhbWVla3NoYSAqCwgCGIAEGMcBGK8BMgoQABiABBiKBRhDMhAQLhiABBiKBRhDGMcBGK8BMgsQLhiABBjHARivATIFEC4YgAQyBRAuGIAEMgUQABiABDIFEAAYgAQyChAAGIAEGIoFGEMyBRAAGIAEMgUQABiABEjXNVDOAljYGXABeAGQAQCYAZoBoAHoBqoBAzUuM7gBAcgBAPgBAZgCCKACiwfCAgYQABgWGB6YAwCIBgGSBwMzLjWgB7tPsgcDMy41uAeLB8IHBzAuNy4wLjHIBxiACAE&sclient=gws-wiz-serp#lrd=0x3a38284c1b2f7cdd:0x3f1c7f81af5eb93e,1,,,,"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center justify-center px-9 py-2.5 bg-gradient-to-r from-[#0ea5e9] to-[#0284c7] text-white font-semibold text-sm sm:text-base rounded-lg shadow-md hover:shadow-lg hover:opacity-95 active:scale-95 transition-all duration-200"
+            className="inline-flex items-center justify-center px-9 py-2.5 bg-[#E71B1E] hover:bg-[#c41215] text-white font-bold text-sm sm:text-base rounded-lg shadow-md hover:shadow-lg hover:scale-[1.02] active:scale-95 transition-all duration-200"
           >
             View All
           </a>

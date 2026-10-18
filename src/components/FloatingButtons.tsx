@@ -7,7 +7,7 @@ export default function FloatingButtons() {
     <>
       {/* Floating WhatsApp Button - Matching Figma Design (Green circle with white border & shadow) */}
       <motion.a
-        href="https://wa.me/919885349798?text=Hello%20VR%20Dental%20Care,%20I%20would%20like%20to%20book%20an%20appointment."
+        href="https://wa.me/918885999857"
         target="_blank"
         rel="noopener noreferrer"
         initial={{ scale: 0, opacity: 0 }}

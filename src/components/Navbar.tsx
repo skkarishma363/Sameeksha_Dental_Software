@@ -92,44 +92,29 @@ export default function Navbar() {
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 w-full shadow-xs">
-      {/* 1. Thin Blue Top Gradient Strip */}
-      <div className="w-full h-8 bg-gradient-to-r from-[#0ea5e9] via-[#0284c7] to-[#38bdf8] text-white flex items-center justify-end px-6 md:px-12 lg:px-20 text-xs font-medium tracking-wide">
-        <div className="flex items-center gap-2">
-          <Phone className="w-3.5 h-3.5 fill-current" />
-          <a href="tel:9885349798" className="hover:underline transition-all">
-            9885349798
-          </a>
-          <span className="opacity-70 px-0.5">|</span>
-          <a href="tel:8790349798" className="hover:underline transition-all">
-            8790349798
-          </a>
-        </div>
-      </div>
+      {/* 1. Thin Red Top Gradient Strip */}
+      <div className="w-full h-8 bg-gradient-to-r from-[#c41215] via-[#E71B1E] to-[#0AA8DE] text-white flex items-center justify-end px-6 md:px-12 lg:px-20 text-xs font-medium tracking-wide" />
 
       {/* 2. Main White Navigation Bar */}
       <div className="w-full bg-white relative h-[72px] flex items-center">
         <div className="max-w-[1360px] mx-auto w-full px-6 md:px-12 lg:px-20 flex items-center justify-between">
           
-          {/* Overlapping Logo Container Badge */}
-          <div className="relative -top-3 z-20 shrink-0">
+          {/* Sameeksha Super Speciality Dental Hospital Logo */}
+          <div className="relative z-20 shrink-0 flex items-center">
             <a
               href="#home"
               onClick={(e) => scrollToSection(e, "#home")}
-              className="bg-white rounded-b-2xl shadow-md px-3.5 pt-2 pb-2.5 flex flex-col items-center border-b border-x border-slate-100 transition-transform hover:scale-[1.02]"
-              style={{ width: "94px" }}
+              className="flex items-center transition-transform hover:scale-[1.02] py-1"
             >
-              <div className="relative w-[72px] h-[64px]">
+              <div className="relative w-[170px] sm:w-[200px] md:w-[230px] lg:w-[250px] h-[48px] sm:h-[54px] md:h-[58px] lg:h-[62px]">
                 <Image
-                  src={getAssetPath("/logo.png")}
-                  alt="V.R. Dental Care & Dental Implant Centre"
+                  src={getAssetPath("/sameeksha-logo.png")}
+                  alt="Sameeksha Super Speciality Dental Hospital"
                   fill
-                  className="object-contain"
+                  className="object-contain object-left"
                   priority
                   unoptimized
                 />
-              </div>
-              <div className="mt-1 px-2 py-0.5 bg-gradient-to-r from-[#0284c7] to-[#0ea5e9] rounded text-[9px] font-bold text-white tracking-wider uppercase shadow-2xs">
-                ESTD. 2011
               </div>
             </a>
           </div>
@@ -145,21 +130,24 @@ export default function Navbar() {
                   key={item.name}
                   href={item.href}
                   onClick={(e) => scrollToSection(e, item.href)}
-                  className={`text-[15px] font-semibold transition-colors duration-200 ${
-                    isActive ? "text-[#0284c7]" : "text-[#1e293b] hover:text-[#0284c7]"
+                  className={`relative text-[15px] font-bold transition-colors duration-200 py-1 ${
+                    isActive ? "text-[#E71B1E]" : "text-[#1e293b] hover:text-[#E71B1E]"
                   }`}
                 >
                   {item.name}
+                  {isActive && (
+                    <span className="absolute bottom-0 left-0 w-full h-[2.5px] bg-[#E71B1E] rounded-full" />
+                  )}
                 </a>
               );
             })}
           </nav>
 
-          {/* Contact Us Button (Figma style: White bg, blue border, blue text) */}
+          {/* Contact Us Button */}
           <div className="hidden lg:block shrink-0">
             <a
-              href="tel:09885349798"
-              className="inline-flex items-center justify-center px-6 py-2 text-[15px] font-semibold text-[#0284c7] bg-white border border-[#0284c7] rounded-lg hover:bg-[#0284c7] hover:text-white transition-all duration-200 shadow-2xs hover:shadow-xs active:scale-95"
+              href="tel:08885999857"
+              className="inline-flex items-center justify-center px-6 py-2.5 text-[15px] font-bold text-white bg-[#E71B1E] hover:bg-[#c41215] rounded-lg transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
             >
               Contact Us
             </a>
@@ -168,14 +156,14 @@ export default function Navbar() {
           {/* Mobile Hamburger Toggle */}
           <div className="flex lg:hidden items-center gap-3">
             <a
-              href="tel:09885349798"
-              className="px-3.5 py-1.5 text-xs font-semibold text-[#0284c7] border border-[#0284c7] rounded-md"
+              href="tel:08885999857"
+              className="px-4 py-2 text-xs font-bold text-white bg-[#E71B1E] hover:bg-[#c41215] rounded-lg shadow-xs"
             >
               Contact Us
             </a>
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 text-slate-700 hover:text-[#0284c7] transition-colors"
+              className="p-2 text-slate-700 hover:text-[#E71B1E] transition-colors"
               aria-label="Toggle Navigation"
             >
               {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
@@ -194,21 +182,24 @@ export default function Navbar() {
                 key={item.name}
                 href={item.href}
                 onClick={(e) => scrollToSection(e, item.href)}
-                className="py-2 text-base font-semibold text-slate-800 hover:text-[#0284c7] transition-colors border-b border-slate-100"
+                className="py-2 text-base font-semibold text-slate-800 hover:text-[#E71B1E] transition-colors border-b border-slate-100"
               >
                 {item.name}
               </a>
             ))}
           </div>
           <div className="pt-2 flex flex-col gap-3">
-            <div className="flex items-center gap-2 text-xs text-slate-600 font-medium">
-              <Phone className="w-3.5 h-3.5 text-[#0284c7]" />
-              <span>9885349798 / 8790349798</span>
-            </div>
+            <a
+              href="tel:08885999857"
+              className="flex items-center gap-2 text-xs text-slate-700 font-semibold hover:text-[#E71B1E] transition-colors"
+            >
+              <Phone className="w-3.5 h-3.5 text-[#E71B1E]" />
+              <span>088859 99857</span>
+            </a>
             <a
               href="#contact"
               onClick={(e) => scrollToSection(e, "#contact")}
-              className="w-full py-2.5 text-center text-sm font-bold text-white bg-gradient-to-r from-[#0ea5e9] to-[#0284c7] rounded-lg shadow-sm"
+              className="w-full py-2.5 text-center text-sm font-bold text-white bg-gradient-to-r from-[#E71B1E] to-[#c41215] rounded-lg shadow-sm"
             >
               Get Online Consultancy
             </a>

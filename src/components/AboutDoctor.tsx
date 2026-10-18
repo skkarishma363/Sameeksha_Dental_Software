@@ -1,131 +1,142 @@
 "use client";
 
 import Image from "next/image";
-import { ArrowRight } from "lucide-react";
 import { getAssetPath } from "@/lib/getAssetPath";
 
 export default function AboutDoctor() {
-  const scrollToContact = (e: React.MouseEvent<HTMLAnchorElement>) => {
-    e.preventDefault();
-    const target = document.querySelector("#consultancy") || document.querySelector("#contact");
-    if (target) {
-      const targetPosition = target.getBoundingClientRect().top + window.scrollY - 90;
-      window.scrollTo({
-        top: Math.max(0, targetPosition),
-        behavior: "smooth",
-      });
-    }
-  };
-
   return (
-    <section id="doctor" className="py-20 lg:py-28 bg-white relative overflow-hidden text-slate-800">
+    <section
+      id="doctor"
+      className="pt-20 sm:pt-24 lg:pt-28 pb-16 sm:pb-20 lg:pb-24 bg-white relative overflow-hidden scroll-mt-28"
+    >
+      {/* Decorative Background: Soft Tooth Outline */}
+      <div
+        className="absolute right-[-2%] top-[12%] w-[380px] h-[460px] opacity-[0.06] pointer-events-none select-none z-0"
+        aria-hidden="true"
+      >
+        <svg
+          viewBox="0 0 100 120"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+          className="w-full h-full stroke-[#0AA8DE]"
+          strokeWidth="1.6"
+        >
+          <path d="M20,35 C20,15 35,8 50,15 C65,8 80,15 80,35 C80,55 75,70 70,105 C68,112 60,112 56,98 C53,86 47,86 44,98 C40,112 32,112 30,105 C25,70 20,55 20,35 Z" />
+        </svg>
+      </div>
+
       <div className="max-w-[1360px] mx-auto px-6 md:px-12 lg:px-20 relative z-10">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 items-center">
-          
-          {/* ================= LEFT CONTENT COLUMN ================= */}
-          <div className="lg:col-span-6 flex flex-col items-start text-left z-10">
-            {/* Eyebrow: ABOUT OUR DOCTOR */}
-            <div className="mb-4">
-              <span className="relative inline-block text-xs md:text-sm font-bold tracking-[0.18em] uppercase pb-1">
-                <span className="relative text-[#0AA8DE]">
+          {/* ================= LEFT SIDE: Content & Typography ================= */}
+          <div className="lg:col-span-6 flex flex-col items-start text-left">
+            {/* Small label: ABOUT OUR DOCTOR */}
+            <div className="mb-3">
+              <span className="relative inline-block text-xs md:text-sm font-extrabold tracking-[0.16em] uppercase pb-1 text-[#0f2942]">
+                <span className="relative text-[#E71B1E]">
                   ABOUT
                   <span className="absolute bottom-0 left-0 w-full h-[2.5px] bg-[#0AA8DE] rounded-full" />
                 </span>
-                <span className="ml-2.5 font-bold text-[#0f2942]">OUR DOCTOR</span>
+                <span className="ml-2 font-bold text-[#0f2942]">OUR DOCTOR</span>
               </span>
             </div>
 
-            {/* Main Heading: Expert Care for / Your Perfect Smile */}
-            <h2 className="text-3xl sm:text-4xl lg:text-[44px] font-extrabold text-[#0f2942] tracking-tight leading-[1.18] mb-4">
-              Expert Care for<br />
-              <span className="text-[#0AA8DE]">Your Perfect Smile</span>
+            {/* Main heading: Expert Care for Healthier Smiles */}
+            <h2 className="text-3xl sm:text-4xl lg:text-[42px] font-extrabold text-[#0f2942] tracking-tight leading-[1.18] mb-3">
+              Expert Care for<br className="hidden sm:inline" />{" "}
+              <span className="text-[#E71B1E]">Healthier Smiles</span>
             </h2>
 
-            {/* Tagline */}
-            <p className="text-[#0AA8DE] font-bold text-base sm:text-lg mb-4 tracking-wide">
+            {/* Tagline: Experienced. Compassionate. Dedicated to Your Smile. */}
+            <p className="text-base sm:text-lg font-semibold text-[#0AA8DE] mb-5 tracking-tight">
               Experienced. Compassionate. Dedicated to Your Smile.
             </p>
 
-            {/* Paragraph Body */}
-            <p className="text-slate-600 text-sm sm:text-base leading-relaxed font-normal mb-8 max-w-xl">
-              With years of experience in advanced dental care, our doctor is committed to providing personalized, gentle, and high-quality treatment. Every patient is cared for with expertise, compassion, and a focus on achieving a healthy, confident smile.
-            </p>
+            {/* Doctor Profile Paragraphs */}
+            <div className="space-y-4 sm:space-y-5 text-slate-600 text-sm sm:text-[15px] leading-relaxed font-normal max-w-2xl">
+              <p>
+                Dr. Suvarna Raju P (BDS, FAGE) is a highly skilled Dental Surgeon and Implantologist who leads the clinical team at Sameeksha Dental Hospital with an enduring commitment to precision, innovation, and evidence-based care.
+              </p>
+              <p>
+                After earning his Bachelor of Dental Surgery and completing specialized training in Implantology at St. Joseph Dental College & Hospital, Eluru, he became an active member of the Indian Dental Association.
+              </p>
+              <p>
+                His clinical expertise encompasses root canal therapy, aesthetic restorations, surgical extractions, pain and infection management, as well as both guided and non-guided dental implant placements.
+              </p>
+              <p>
+                Anchored by a conservative treatment philosophy, Dr. Suvarna Raju prioritizes preserving natural tooth structure whenever possible by integrating advanced diagnostics, digital dentistry, and strict sterilization protocols. He ensures the practice remains at the forefront of contemporary dental science while delivering personalized, minimally invasive care tailored to each individual.
+              </p>
+              <p>
+                Dedicated to clinical excellence and patient well-being, his primary focus is providing accurate diagnoses and virtually painless procedures that minimize downtime while optimizing both functional aesthetics and long-term oral health. Under his compassionate direction, patients experience comfortable, trustworthy, and results-driven dentistry designed to restore confident, healthy smiles.
+              </p>
+            </div>
+          </div>
 
-            {/* CTA Button: Know More → */}
-            <div>
-              <a
-                href="#contact"
-                onClick={scrollToContact}
-                className="inline-flex items-center justify-center gap-2.5 px-7 py-3.5 bg-[#0AA8DE] text-white font-semibold text-sm sm:text-base rounded-lg shadow-md shadow-[#0AA8DE]/25 hover:bg-[#0896c7] hover:shadow-lg active:scale-95 transition-all duration-200 cursor-pointer group"
+          {/* ================= RIGHT SIDE: Doctor Image Placeholder & Decorative Elements ================= */}
+          <div className="lg:col-span-6 w-full flex justify-center lg:justify-end">
+            <div className="relative w-full max-w-[440px] sm:max-w-[470px] lg:max-w-[500px] flex items-center justify-center">
+              
+              {/* Decorative 1: Soft Light-Blue Circular / Curved Background Shape */}
+              <div
+                className="absolute inset-0 -m-4 sm:-m-6 rounded-full bg-gradient-to-tr from-[#0AA8DE]/15 via-[#0AA8DE]/8 to-transparent -z-10 blur-xl pointer-events-none"
+                aria-hidden="true"
+              />
+              <div
+                className="absolute -right-4 sm:-right-8 top-1/2 -translate-y-1/2 w-72 sm:w-96 h-72 sm:h-96 rounded-full bg-[#0AA8DE]/10 -z-10 pointer-events-none"
+                aria-hidden="true"
+              />
+
+              {/* Decorative 2: Small Blue Decorative Dots Grid */}
+              <div
+                className="absolute -top-6 -left-4 sm:-left-8 w-24 h-24 grid grid-cols-5 gap-2.5 opacity-40 pointer-events-none -z-10"
+                aria-hidden="true"
               >
-                <span>Know More</span>
-                <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
-              </a>
-            </div>
-
-          </div>
-
-          {/* ================= RIGHT COLUMN: DOCTOR & DECORATIVE GRAPHICS ================= */}
-          <div className="lg:col-span-6 w-full relative flex items-center justify-center py-6 lg:py-0">
-            <div className="relative w-full max-w-[480px] lg:max-w-[520px] aspect-[4/4.5] flex items-center justify-center">
-
-              {/* 1. Large Soft Light-Blue Circular Background */}
-              <div className="absolute w-[340px] h-[340px] sm:w-[420px] sm:h-[420px] rounded-full bg-[#edf9fd] border border-[#d2f0fa] -z-10 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 shadow-inner" />
-
-              {/* 2. Inner Layer Circular Accent */}
-              <div className="absolute w-[280px] h-[280px] sm:w-[350px] sm:h-[350px] rounded-full bg-gradient-to-tr from-[#dcf3fb] to-[#f0fbfe] -z-10 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-90" />
-
-              {/* 3. Subtle Gradient Wash Glow */}
-              <div className="absolute inset-0 bg-gradient-to-tr from-[#0AA8DE]/10 via-transparent to-transparent blur-2xl -z-10 rounded-full" />
-
-              {/* 4. Dotted Grid (Upper-Left of Doctor Area) */}
-              <div className="absolute top-4 left-2 sm:left-6 w-24 h-24 -z-10 opacity-35 pointer-events-none">
-                <svg width="96" height="96" viewBox="0 0 96 96" fill="none">
-                  <pattern id="dot-grid" x="0" y="0" width="16" height="16" patternUnits="userSpaceOnUse">
-                    <circle cx="3" cy="3" r="2.5" fill="#0AA8DE" />
-                  </pattern>
-                  <rect width="96" height="96" fill="url(#dot-grid)" />
-                </svg>
-              </div>
-
-              {/* 5. Thin RED Curved Arc (Right side of Doctor) */}
-              <div className="absolute right-0 sm:right-2 top-1/4 w-24 sm:w-28 h-48 -z-10 pointer-events-none">
-                <svg viewBox="0 0 100 200" fill="none" className="w-full h-full">
-                  <path
-                    d="M 10,10 C 80,60 80,140 10,190"
-                    stroke="#E71B1E"
-                    strokeWidth="3"
-                    strokeLinecap="round"
+                {[...Array(25)].map((_, i) => (
+                  <span
+                    key={i}
+                    className="w-1.5 h-1.5 rounded-full bg-[#0AA8DE]"
                   />
-                </svg>
+                ))}
               </div>
 
-              {/* 6. Subtle Tooth Outline (Upper-Right) */}
-              <div className="absolute top-2 right-6 sm:right-12 w-20 h-20 -z-10 opacity-15 pointer-events-none">
-                <svg viewBox="0 0 24 24" fill="none" stroke="#0AA8DE" strokeWidth="1.2">
-                  <path d="M12 2C8 2 5 4 5 7c0 3 1.5 5 2 7.5S8 22 10 22s2-3.5 2-6c0 2.5 0 6 2 6s3-4.5 3-7.5 2-4.5 2-7.5c0-3-3-5-7-5z" />
-                </svg>
-              </div>
-
-              {/* 7. Subtle Decorative Ring (Bottom-Right) */}
-              <div className="absolute bottom-4 right-8 w-16 h-16 rounded-full border-2 border-dashed border-[#0AA8DE]/25 -z-10 pointer-events-none" />
-
-              {/* Doctor Image Overlay */}
-              <div className="relative w-full h-full z-10 flex items-end justify-center">
-                <Image
-                  src={getAssetPath("/doctor.png")}
-                  alt="V.R. Dental Care Lead Dentist & Specialist"
-                  fill
-                  className="object-contain object-bottom filter drop-shadow-[0_15px_25px_rgba(15,41,66,0.15)]"
-                  sizes="(max-width: 1024px) 100vw, 50vw"
-                  priority
-                  unoptimized
+              {/* Decorative 3: Thin Red Curved Accent Line */}
+              <svg
+                className="absolute -bottom-6 -left-6 sm:-left-10 w-28 sm:w-36 h-20 pointer-events-none -z-10"
+                viewBox="0 0 140 80"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <path
+                  d="M10 70 Q 70 10 130 50"
+                  stroke="#E71B1E"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
                 />
+              </svg>
+
+              {/* Doctor Image Container */}
+              <div className="relative w-full aspect-[4/5] min-h-[420px] sm:min-h-[480px] lg:min-h-[520px] rounded-3xl sm:rounded-[36px] bg-gradient-to-b from-[#0AA8DE]/12 via-[#0AA8DE]/5 to-[#0AA8DE]/15 border-2 border-dashed border-[#0AA8DE]/40 shadow-xl shadow-slate-200/50 flex items-end justify-center pt-3 px-3 pb-0 sm:pt-4 sm:px-4 overflow-hidden group">
+                
+                {/* Subtle internal background glow */}
+                <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-52 h-52 rounded-full bg-white/60 blur-2xl pointer-events-none" />
+
+                {/* Doctor Cutout PNG */}
+                <div className="relative w-full h-full flex items-end justify-center z-10">
+                  <Image
+                    src={getAssetPath("/doctor_raju.png")}
+                    alt="Dr. P. S. Raju - Dental Surgeon"
+                    fill
+                    priority
+                    className="object-contain object-bottom drop-shadow-[0_10px_20px_rgba(10,168,222,0.12)]"
+                    sizes="(max-width: 640px) 90vw, (max-width: 1024px) 470px, 500px"
+                    unoptimized
+                  />
+                </div>
+
               </div>
 
             </div>
           </div>
-
         </div>
       </div>
     </section>

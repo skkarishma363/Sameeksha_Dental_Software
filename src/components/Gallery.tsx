@@ -32,20 +32,23 @@ export default function Gallery() {
       <div className="max-w-[1360px] mx-auto px-6 md:px-12 lg:px-20 relative z-20 text-center">
         
         {/* Section Heading */}
-        <h2 className="text-3xl sm:text-4xl lg:text-[42px] font-bold text-[#0f2942] tracking-tight mb-12 lg:mb-16">
-          Gallery
-        </h2>
+        <div className="inline-block mb-12 lg:mb-16">
+          <h2 className="text-3xl sm:text-4xl lg:text-[42px] font-bold text-[#0f2942] tracking-tight">
+            Gallery
+          </h2>
+          <div className="w-14 h-1 bg-[#0AA8DE] mx-auto mt-2.5 rounded-full" />
+        </div>
 
         {/* Gallery 1 + 4 Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 md:gap-6 items-stretch max-w-[1100px] mx-auto">
           
-          {/* LEFT: One Large Clinic Operatory Image (~50% width) */}
-          <div className="lg:col-span-6 relative w-full aspect-[4/3] lg:aspect-auto lg:h-[430px] rounded-2xl md:rounded-3xl overflow-hidden shadow-md border border-slate-100 group">
+          {/* LEFT: One Large Clinic Operatory Image (~50% width) - 1. Dental clinic interior and consultation room */}
+          <div className="lg:col-span-6 relative w-full aspect-[4/3] lg:aspect-auto lg:h-[430px] rounded-2xl md:rounded-3xl overflow-hidden shadow-md border border-slate-100 hover:border-[#E71B1E] hover:shadow-xl transition-all duration-300 group">
             <Image
-              src={getAssetPath("/gallery/chair.jpg")}
-              alt="VR Dental Care Modern Operatory Chair Room"
+              src={getAssetPath("/gallery/gallery_1.jpg")}
+              alt="Sameeksha Dental Hospital Clinic Interior and Consultation Room"
               fill
-              className="object-cover group-hover:scale-105 transition-transform duration-500"
+              className="object-cover object-center group-hover:scale-105 transition-transform duration-500"
               sizes="(max-width: 1024px) 100vw, 50vw"
               priority
               unoptimized
@@ -55,49 +58,49 @@ export default function Gallery() {
           {/* RIGHT: 2x2 Grid of 4 Smaller Images */}
           <div className="lg:col-span-6 grid grid-cols-2 gap-4 md:gap-5 w-full">
             
-            {/* Top-Left: Exterior Building */}
-            <div className="relative w-full aspect-[4/3] lg:h-[202px] rounded-2xl overflow-hidden shadow-sm border border-slate-100 group">
+            {/* Top-Left: Image 2 - Dental treatment room and equipment */}
+            <div className="relative w-full aspect-[4/3] lg:h-[202px] rounded-2xl overflow-hidden shadow-sm border border-slate-100 hover:border-[#E71B1E] hover:shadow-md transition-all duration-300 group">
               <Image
-                src={getAssetPath("/gallery/building.jpg")}
-                alt="VR Dental Care Building Exterior"
+                src={getAssetPath("/gallery/gallery_2.jpg")}
+                alt="Sameeksha Dental Hospital Dental Treatment Room and Equipment"
                 fill
-                className="object-cover object-[center_28%] group-hover:scale-105 transition-transform duration-500"
+                className="object-cover object-center group-hover:scale-105 transition-transform duration-500"
                 sizes="(max-width: 1024px) 50vw, 25vw"
                 unoptimized
               />
             </div>
 
-            {/* Top-Right: Reception Desk */}
-            <div className="relative w-full aspect-[4/3] lg:h-[202px] rounded-2xl overflow-hidden shadow-sm border border-slate-100 group">
+            {/* Top-Right: Image 3 - Clinic reception area */}
+            <div className="relative w-full aspect-[4/3] lg:h-[202px] rounded-2xl overflow-hidden shadow-sm border border-slate-100 hover:border-[#E71B1E] hover:shadow-md transition-all duration-300 group">
               <Image
-                src={getAssetPath("/gallery/reception.jpg")}
-                alt="VR Dental Care Clinic Reception Desk"
+                src={getAssetPath("/gallery/gallery_3.jpg")}
+                alt="Sameeksha Dental Hospital Clinic Reception Area"
                 fill
-                className="object-cover group-hover:scale-105 transition-transform duration-500"
+                className="object-cover object-[center_60%] group-hover:scale-105 transition-transform duration-500"
                 sizes="(max-width: 1024px) 50vw, 25vw"
                 unoptimized
               />
             </div>
 
-            {/* Bottom-Left: OPG / X-ray Unit */}
-            <div className="relative w-full aspect-[4/3] lg:h-[202px] rounded-2xl overflow-hidden shadow-sm border border-slate-100 group">
+            {/* Bottom-Left: Image 4 - Clinic exterior and signage */}
+            <div className="relative w-full aspect-[4/3] lg:h-[202px] rounded-2xl overflow-hidden shadow-sm border border-slate-100 hover:border-[#E71B1E] hover:shadow-md transition-all duration-300 group">
               <Image
-                src={getAssetPath("/gallery/xray.jpg")}
-                alt="VR Dental Care Digital X-Ray Setup"
+                src={getAssetPath("/gallery/gallery_4.jpg")}
+                alt="Sameeksha Super Speciality Dental Hospital Clinic Exterior and Signage"
                 fill
-                className="object-cover group-hover:scale-105 transition-transform duration-500"
+                className="object-cover object-[center_32%] group-hover:scale-105 transition-transform duration-500"
                 sizes="(max-width: 1024px) 50vw, 25vw"
                 unoptimized
               />
             </div>
 
-            {/* Bottom-Right: 3D Intraoral Scanner Laptop Setup */}
-            <div className="relative w-full aspect-[4/3] lg:h-[202px] rounded-2xl overflow-hidden shadow-sm border border-slate-100 group">
+            {/* Bottom-Right: Image 5 - Additional dental treatment room and equipment */}
+            <div className="relative w-full aspect-[4/3] lg:h-[202px] rounded-2xl overflow-hidden shadow-sm border border-slate-100 hover:border-[#E71B1E] hover:shadow-md transition-all duration-300 group">
               <Image
-                src={getAssetPath("/gallery/scanner.png")}
-                alt="VR Dental Care 3D Intraoral Scanner"
+                src={getAssetPath("/gallery/gallery_5.jpg")}
+                alt="Sameeksha Dental Hospital Additional Dental Treatment Room and Equipment"
                 fill
-                className="object-cover group-hover:scale-105 transition-transform duration-500"
+                className="object-cover object-center group-hover:scale-105 transition-transform duration-500"
                 sizes="(max-width: 1024px) 50vw, 25vw"
                 unoptimized
               />
@@ -112,7 +115,7 @@ export default function Gallery() {
           <a
             href="#contact"
             onClick={scrollToContact}
-            className="inline-flex items-center justify-center px-9 py-2.5 bg-gradient-to-r from-[#0ea5e9] to-[#0284c7] text-white font-semibold text-sm sm:text-base rounded-lg shadow-md hover:shadow-lg hover:opacity-95 active:scale-95 transition-all duration-200"
+            className="inline-flex items-center justify-center px-9 py-2.5 bg-[#E71B1E] hover:bg-[#c41215] text-white font-bold text-sm sm:text-base rounded-lg shadow-md hover:shadow-lg hover:scale-[1.02] active:scale-95 transition-all duration-200"
           >
             View All
           </a>

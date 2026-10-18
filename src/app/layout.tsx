@@ -1,18 +1,25 @@
-import type { Metadata } from "next";
-import { Inter, Poppins } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Manrope, Inter, Playfair_Display } from "next/font/google";
 import "./globals.css";
 import { PwaRegister } from "@/components/pwa-register";
 
-const inter = Inter({
-  variable: "--font-inter",
+const manrope = Manrope({
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  variable: "--font-manrope",
+  weight: ["400", "500", "600", "700", "800"],
 });
 
-const poppins = Poppins({
-  variable: "--font-poppins",
+const inter = Inter({
   subsets: ["latin"],
-  weight: ["600", "700"],
+  variable: "--font-inter",
+  weight: ["300", "400", "500", "600", "700"],
+});
+
+const playfair = Playfair_Display({
+  subsets: ["latin"],
+  variable: "--font-serif",
+  weight: ["400", "600", "700", "800"],
+  style: ["normal", "italic"],
 });
 
 const isProd = process.env.NODE_ENV === "production";
@@ -23,8 +30,38 @@ const basePath = process.env.NEXT_PUBLIC_BASE_PATH !== undefined
   : defaultBasePath;
 
 export const metadata: Metadata = {
-  title: "DentPro OS - Dental Practice Management Software",
-  description: "The modern, all-in-one practice management platform for dental clinics. HIPAA compliant, responsive scheduling, billing, and patient charts.",
+  title: "Sameeksha Super Speciality Dental Hospital & Implant Centre | Ramanayyapeta",
+  description: "Sameeksha Super Speciality Dental Hospital & Implant Centre in Ramanayyapeta provides comprehensive, advanced dental care, dental implants, root canal treatment, laser dentistry, orthodontics, cosmetic smile makeovers, and oral healthcare.",
+  keywords: [
+    "Sameeksha Dental Hospital",
+    "Sameeksha Super Speciality Dental Hospital",
+    "Sameeksha Dental Implant Centre",
+    "Dentist in Ramanayyapeta",
+    "Dental Hospital Ramanayapeta",
+    "Dr Suvarna Raju P",
+    "Dr P S Raju",
+    "Dental Implants",
+    "Root Canal Treatment",
+    "Laser Surgeries",
+    "Orthodontics",
+    "Invisalign",
+    "Teeth Whitening",
+    "Cosmetic Dentistry",
+    "Dentures",
+  ],
+  authors: [{ name: "Sameeksha Super Speciality Dental Hospital & Implant Centre" }],
+  openGraph: {
+    title: "Sameeksha Super Speciality Dental Hospital & Implant Centre | Ramanayyapeta",
+    description: "Transforming Smiles, Transforming Lives. High-precision dental implantology, root canal treatments, and comprehensive cosmetic dental care.",
+    type: "website",
+    locale: "en_US",
+    siteName: "Sameeksha Super Speciality Dental Hospital & Implant Centre",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Sameeksha Super Speciality Dental Hospital & Implant Centre | Ramanayyapeta",
+    description: "Transforming Smiles, Transforming Lives. High-precision dental implantology, root canal treatments, and comprehensive cosmetic dental care.",
+  },
   icons: {
     icon: [
       { url: `${basePath}/favicon.ico`, sizes: "any" },
@@ -39,6 +76,12 @@ export const metadata: Metadata = {
   manifest: `${basePath}/manifest.webmanifest`,
 };
 
+export const viewport: Viewport = {
+  themeColor: "#E71B1E",
+  width: "device-width",
+  initialScale: 1,
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -47,10 +90,14 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${poppins.variable} h-full antialiased`}
+      className={`${manrope.variable} ${inter.variable} ${playfair.variable} h-full antialiased scroll-smooth`}
       suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col" suppressHydrationWarning>
+      <body
+        className="min-h-full flex flex-col bg-white text-[#0F172A] selection:bg-[#E71B1E] selection:text-white font-sans relative z-0"
+        style={{ zIndex: 0 }}
+        suppressHydrationWarning
+      >
         <PwaRegister />
         {children}
       </body>
