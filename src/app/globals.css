@@ -566,6 +566,15 @@ section, [id] {
     page-break-inside: avoid !important;
     page-break-after: avoid !important;
   }
+  #print-area .official-invoice-container {
+    width: 210mm !important;
+    height: 291.9mm !important;
+    max-height: 291.9mm !important;
+    margin: 2.5mm auto !important;
+    overflow: hidden !important;
+    page-break-inside: avoid !important;
+    page-break-after: avoid !important;
+  }
   /* Hide print buttons and layout wrappers during print */
   #print-area .no-print {
     display: none !important;

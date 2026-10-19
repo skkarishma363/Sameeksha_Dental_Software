@@ -80,7 +80,9 @@ import { Label } from "@/components/ui/label";
 import { DentalLogo } from "@/components/dental-logo";
 import { OfficialSameekshaCaseSheet } from "@/components/OfficialSameekshaCaseSheet";
 import { OfficialSameekshaPrescription } from "@/components/OfficialSameekshaPrescription";
+import { OfficialSameekshaInvoice } from "@/components/OfficialSameekshaInvoice";
 import { downloadSameekshaPrescriptionPDF } from "@/lib/prescriptionPdfGenerator";
+import { downloadSameekshaInvoicePDF } from "@/lib/invoicePdfGenerator";
 import { createClient } from "@/lib/supabase/client";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -1975,6 +1977,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
   } | null>(null);
   const [prescOverflowWarning, setPrescOverflowWarning] = useState(false);
   const [isGeneratingPrescPdf, setIsGeneratingPrescPdf] = useState(false);
+  const [isGeneratingInvoicePdf, setIsGeneratingInvoicePdf] = useState(false);
 
   // Global Dialog triggers
   const [quickAddOpen, setQuickAddOpen] = useState(false);
@@ -4155,6 +4158,28 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       showToast("Failed to generate prescription PDF: " + (err.message || err), "error");
     } finally {
       setIsGeneratingPrescPdf(false);
+    }
+  };
+
+  const handleDownloadInvoicePDF = async (invItem?: InvoiceItem | null) => {
+    const targetInv = invItem || lastGeneratedReceipt;
+    if (!targetInv) return;
+    try {
+      setIsGeneratingInvoicePdf(true);
+      const patientObj = patients.find(p => p.id === targetInv.patientId || p.name === targetInv.patientName);
+      const res = await downloadSameekshaInvoicePDF({
+        patient: patientObj,
+        invoice: targetInv,
+        dateStr: targetInv.paymentDate,
+      });
+      if (res.success) {
+        showToast("Invoice PDF downloaded successfully.", "success");
+      }
+    } catch (err: any) {
+      console.error("Invoice PDF generation failed:", err);
+      showToast("Failed to generate invoice PDF: " + (err.message || err), "error");
+    } finally {
+      setIsGeneratingInvoicePdf(false);
     }
   };
 
@@ -10322,13 +10347,18 @@ ${clinicName}`;
                                 </button>
                               )}
                               <button
-                                onClick={() => {
-                                  alert(`Print layout prepared for receipt ${inv.id}.`);
-                                  setLastGeneratedReceipt(inv);
-                                }}
+                                type="button"
+                                onClick={() => setLastGeneratedReceipt(inv)}
                                 className="text-blue-600 hover:underline font-bold"
                               >
                                 Print
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadInvoicePDF(inv)}
+                                className="text-emerald-600 hover:underline font-bold ml-2"
+                              >
+                                PDF
                               </button>
                             </td>
                           </tr>
@@ -12031,11 +12061,19 @@ ${clinicName}`;
                     <div className="flex items-center justify-center gap-2 shrink-0">
                       <button
                         type="button"
-                        title="Generate Invoice"
+                        title="View & Print Invoice"
                         onClick={() => setLastGeneratedReceipt(inv)}
                         className="h-9 w-9 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-955/40 dark:text-blue-400 dark:hover:bg-blue-900/60 flex items-center justify-center transition-colors cursor-pointer shrink-0"
                       >
                         <FileText className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        title="Download Invoice PDF"
+                        onClick={() => handleDownloadInvoicePDF(inv)}
+                        className="h-9 w-9 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 dark:hover:bg-emerald-900/60 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                      >
+                        <Download className="h-4 w-4" />
                       </button>
                       <button
                         type="button"
@@ -15652,223 +15690,74 @@ ${clinicName}`;
         </div>
       )}
 
-      {/* Receipt Modal (Design printer-friendly print logs) */}
+      {/* Receipt Modal: Authentic Sameeksha Dental Hospital Invoice */}
       {lastGeneratedReceipt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-955/50 backdrop-blur-xs p-3 sm:p-6 overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-3 sm:p-6 overflow-hidden">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-2xl max-h-[calc(100dvh-24px)] sm:max-h-[calc(100vh-48px)] flex flex-col bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl overflow-hidden text-xs my-auto"
+            className="w-full max-w-4xl max-h-[calc(100dvh-24px)] sm:max-h-[calc(100vh-48px)] flex flex-col bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden text-xs my-auto"
           >
             {/* Header - Not printed */}
-            <div className="flex items-center justify-between px-4 sm:px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 shrink-0 no-print bg-white dark:bg-slate-950">
-              <span className="font-bold text-sm text-slate-900 dark:text-white">Professional Dental Invoice Preview</span>
-              <button onClick={() => setLastGeneratedReceipt(null)} className="text-slate-400 hover:text-slate-650 dark:hover:text-slate-200 cursor-pointer p-1">
-                <X className="h-4 w-4" />
-              </button>
+            <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 border-b border-slate-100 dark:border-slate-800 shrink-0 no-print bg-white dark:bg-slate-950">
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 rounded-lg bg-blue-50 dark:bg-blue-950/50 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                  <FileText className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                    Official Sameeksha Hospital Invoice
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Invoice #{lastGeneratedReceipt.id} • Patient: <strong className="text-slate-800 dark:text-slate-200">{lastGeneratedReceipt.patientName}</strong>
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  onClick={() => handleDownloadInvoicePDF(lastGeneratedReceipt)}
+                  disabled={isGeneratingInvoicePdf}
+                  className="h-8 px-3 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {isGeneratingInvoicePdf ? "Generating..." : "Download PDF"}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="h-8 px-3 rounded bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  Print Invoice
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setLastGeneratedReceipt(null)}
+                  className="h-8 w-8 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                  title="Close preview"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
-            {/* Printable Content Section */}
-            <div id="print-area" className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-4 bg-white text-slate-900 border-x border-slate-300 print:overflow-visible print:p-0 print:border-none scrollbar-thin">
-
-              {/* Clinic details header (Centered) */}
-              <div className="text-center space-y-1 pb-2">
-                <h1 className="text-xl font-extrabold text-blue-900 tracking-tight">
-                  Sameeksha Super Speciality Dental Hospital
-                </h1>
-                <p className="text-[11px] text-slate-700 font-medium max-w-md mx-auto leading-tight">
-                  CHOWDARY GUEST HOUSE, GROUND FLOOR, NEAR RTC COLONY 4 ROAD JUNCTION, Ramanayapeta, Andhra Pradesh 533005
-                </p>
-                <p className="text-[11px] font-bold text-slate-800">
-                  PH: 088859 99857
-                </p>
+            {/* Modal Body: Authentic Sameeksha Invoice Template */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-100 dark:bg-slate-950/60 flex justify-center items-start scrollbar-thin">
+              <div id="print-area" className="w-full max-w-[210mm] bg-white rounded-lg shadow-xl overflow-hidden border border-slate-300 print:shadow-none print:border-none print:max-w-none print:rounded-none">
+                {(() => {
+                  const patientObj = patients.find(p => p.id === lastGeneratedReceipt.patientId || p.name === lastGeneratedReceipt.patientName);
+                  return (
+                    <OfficialSameekshaInvoice
+                      patient={patientObj}
+                      invoice={lastGeneratedReceipt}
+                      dateStr={lastGeneratedReceipt.paymentDate}
+                    />
+                  );
+                })()}
               </div>
-              <hr className="border-slate-400 my-2" />
-
-              {/* Invoice Header Information & Patient Info */}
-              {(() => {
-                const patientObj = patients.find(p => p.id === lastGeneratedReceipt.patientId || p.name === lastGeneratedReceipt.patientName);
-                const ageGenderStr = patientObj ? `${patientObj.age} ${patientObj.gender}` : "";
-                const rawDate = lastGeneratedReceipt.paymentDate || new Date().toISOString().split("T")[0];
-                const formattedDate = rawDate.includes("T") ? rawDate.split("T")[0] : rawDate.split(" ")[0];
-
-                return (
-                  <>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 print:grid-cols-2 gap-3 sm:gap-6 print:gap-6 text-xs font-semibold py-1 text-slate-900">
-                      {/* Left column */}
-                      <div className="space-y-1">
-                        <div className="flex flex-wrap items-baseline gap-x-2">
-                          <span className="w-24 sm:w-28 print:w-28 shrink-0 font-bold text-slate-900">Invoice No :</span>
-                          <span className="font-semibold text-slate-800">{lastGeneratedReceipt.id}</span>
-                        </div>
-                        <div className="flex flex-wrap items-baseline gap-x-2">
-                          <span className="w-24 sm:w-28 print:w-28 shrink-0 font-bold text-slate-900">Date :</span>
-                          <span className="font-semibold text-slate-800">{formattedDate}</span>
-                        </div>
-                      </div>
-
-                      {/* Right column */}
-                      <div className="space-y-1">
-                        <div className="flex flex-wrap items-baseline gap-x-2">
-                          <span className="w-24 sm:w-28 print:w-28 shrink-0 font-bold text-slate-900">Patient Name :</span>
-                          <span className="font-semibold text-slate-800">{lastGeneratedReceipt.patientName}</span>
-                        </div>
-                        {ageGenderStr ? (
-                          <div className="flex flex-wrap items-baseline gap-x-2">
-                            <span className="w-24 sm:w-28 print:w-28 shrink-0 font-bold text-slate-900">Age/Gender :</span>
-                            <span className="font-semibold text-slate-800">{ageGenderStr}</span>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                    <hr className="border-slate-400 my-2" />
-                  </>
-                );
-              })()}
-
-              {/* Treatment Details Table */}
-              <div className="min-h-[140px] pt-1 overflow-x-auto print:overflow-visible scrollbar-thin">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="border-b-2 border-slate-400 text-slate-900">
-                      <th className="py-2 px-2 font-bold w-14">Sl No.</th>
-                      <th className="py-2 px-2 font-bold">Treatment Details</th>
-                      <th className="py-2 px-2 font-bold text-right w-32">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {lastGeneratedReceipt.items && lastGeneratedReceipt.items.length > 0 ? (
-                      lastGeneratedReceipt.items.map((item, idx) => (
-                        <tr key={idx} className="text-slate-800">
-                          <td className="py-2.5 px-2 font-bold">{idx + 1}</td>
-                          <td className="py-2.5 px-2 font-medium break-words">{item.description}</td>
-                          <td className="py-2.5 px-2 text-right font-bold font-mono">
-                            {item.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr className="text-slate-800">
-                        <td className="py-2.5 px-2 font-bold">1</td>
-                        <td className="py-2.5 px-2 font-medium break-words">{lastGeneratedReceipt.treatment || "Dental Treatment"}</td>
-                        <td className="py-2.5 px-2 text-right font-bold font-mono">
-                          {lastGeneratedReceipt.subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              <hr className="border-slate-400 my-3" />
-
-              {/* Financial Summary (Right Aligned) */}
-              <div className="flex justify-end my-3">
-                <div className="w-full sm:w-64 print:w-64 space-y-1.5 text-xs font-bold text-slate-900">
-                  <div className="flex justify-between">
-                    <span>Gross amount :</span>
-                    <span className="font-mono">
-                      {lastGeneratedReceipt.subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Amount paid :</span>
-                    <span className="font-mono">
-                      {lastGeneratedReceipt.paidAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div className="flex justify-between border-t border-slate-300 pt-1">
-                    <span>Balance :</span>
-                    <span className="font-mono">
-                      {(lastGeneratedReceipt.total - lastGeneratedReceipt.paidAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Payment Details Section Box */}
-              <div className="border border-slate-400 rounded-none p-0 my-3 overflow-hidden">
-                <div className="bg-slate-100 px-3 py-1.5 border-b border-slate-400 font-bold text-xs text-slate-900">
-                  Payment Details
-                </div>
-                <div className="overflow-x-auto print:overflow-visible scrollbar-thin">
-                  <table className="w-full min-w-[500px] sm:min-w-full print:min-w-full text-center border-collapse text-[11px]">
-                    <thead>
-                      <tr className="border-b border-slate-300 bg-slate-50 text-slate-800 font-bold">
-                        <th className="py-1.5 px-2 border-r border-slate-300">Receipt No</th>
-                        <th className="py-1.5 px-2 border-r border-slate-300">Amt Received</th>
-                        <th className="py-1.5 px-2 border-r border-slate-300">Amt.Refund</th>
-                        <th className="py-1.5 px-2 border-r border-slate-300">Mode</th>
-                        <th className="py-1.5 px-2 border-r border-slate-300">Date</th>
-                        <th className="py-1.5 px-2 border-r border-slate-300">NO</th>
-                        <th className="py-1.5 px-2">Bank Name</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lastGeneratedReceipt.paymentLogs && lastGeneratedReceipt.paymentLogs.length > 0 ? (
-                        lastGeneratedReceipt.paymentLogs.map((log, idx) => (
-                          <tr key={idx} className="border-b border-slate-200 text-slate-800 font-medium">
-                            <td className="py-1.5 px-2 border-r border-slate-300 font-mono">10{idx + 1}</td>
-                            <td className="py-1.5 px-2 border-r border-slate-300 font-mono font-bold">
-                              {log.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
-                            <td className="py-1.5 px-2 border-r border-slate-300 font-mono">0.00</td>
-                            <td className="py-1.5 px-2 border-r border-slate-300">{log.method}</td>
-                            <td className="py-1.5 px-2 border-r border-slate-300">{log.date || lastGeneratedReceipt.paymentDate}</td>
-                            <td className="py-1.5 px-2 border-r border-slate-300">-</td>
-                            <td className="py-1.5 px-2">-</td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr className="text-slate-800 font-medium">
-                          <td className="py-1.5 px-2 border-r border-slate-300 font-mono">101</td>
-                          <td className="py-1.5 px-2 border-r border-slate-300 font-mono font-bold">
-                            {lastGeneratedReceipt.paidAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-1.5 px-2 border-r border-slate-300 font-mono">0.00</td>
-                          <td className="py-1.5 px-2 border-r border-slate-300">Cash</td>
-                          <td className="py-1.5 px-2 border-r border-slate-300">{lastGeneratedReceipt.paymentDate}</td>
-                          <td className="py-1.5 px-2 border-r border-slate-300">-</td>
-                          <td className="py-1.5 px-2">-</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Dynamic Amount in Words & Signatory Block */}
-              <div className="flex flex-col sm:flex-row print:flex-row justify-between items-start sm:items-end print:items-end gap-4 sm:gap-0 pt-4 my-2 text-xs">
-                <div className="font-extrabold text-slate-900 uppercase tracking-wide max-w-full sm:max-w-xs print:max-w-xs break-words">
-                  {numberToWords(lastGeneratedReceipt.paidAmount || lastGeneratedReceipt.total)}
-                </div>
-
-                <div className="text-left sm:text-right print:text-right space-y-1 text-slate-900 shrink-0 self-end sm:self-auto">
-                  <div className="font-bold">Authorised Signatory</div>
-                  <div className="text-[11px] font-semibold text-slate-800">Sameeksha Super Speciality Dental Hospital</div>
-                  <div className="text-[10px] font-bold tracking-wider uppercase text-slate-900">DENTAL SURGEON & IMPLANTOLOGIST</div>
-                </div>
-              </div>
-
             </div>
-
-            {/* Action buttons footer - Not printed */}
-            <div className="p-4 sm:p-5 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-100 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-2.5 shrink-0 no-print">
-              <button
-                onClick={() => {
-                  window.print();
-                }}
-                className="h-10 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center gap-1.5 font-bold shadow-xs cursor-pointer"
-              >
-                <Printer className="h-4 w-4" /> Print Invoice
-              </button>
-              <button
-                onClick={() => setLastGeneratedReceipt(null)}
-                className="h-10 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 dark:bg-slate-950 dark:border-slate-800 dark:hover:bg-slate-900 text-slate-800 dark:text-slate-200 flex items-center justify-center font-bold cursor-pointer"
-              >
-                Close Preview
-              </button>
-            </div>
-
           </motion.div>
         </div>
       )}
