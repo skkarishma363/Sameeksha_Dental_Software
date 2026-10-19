@@ -1318,35 +1318,101 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       setPatients(mappedPatients);
     }
 
-    // 2. Fetch billing / invoices
-    const { data: dbBilling, error: billErr } = await supabase
+    // 2. Fetch billing / invoices from existing 'invoices' table with relational line items & payments
+    const { data: dbInvoices, error: invErr } = await supabase
+      .from("invoices")
+      .select("*, invoice_items(*), payments(*)")
+      .order("created_at", { ascending: false });
+
+    const { data: dbBilling } = await supabase
       .from("billing")
       .select("*")
       .order("created_at", { ascending: false });
 
-    if (billErr) {
+    if (invErr && !dbBilling) {
+      console.error("Failed to load invoices from database:", invErr.message);
       showToast("Error loading invoices from database.", "error");
-    } else if (dbBilling) {
-      const mappedInvoices: InvoiceItem[] = dbBilling.map(b => ({
-        id: b.invoice_id,
-        uuid: b.id,
-        patientId: dbPatients?.find(p => p.id === b.patient_id)?.patient_id || "",
-        patientName: b.patient_name,
-        doctor: b.doctor || "",
-        treatment: b.treatment || "",
-        items: Array.isArray(b.items) ? b.items : [],
-        discount: Number(b.discount) || 0,
-        discountType: b.discount_type || undefined,
-        discountValue: Number(b.discount_value) || undefined,
-        tax: Number(b.tax) || 0,
-        subtotal: Number(b.subtotal) || 0,
-        total: Number(b.total) || 0,
-        paidAmount: Number(b.paid_amount) || 0,
-        status: b.status || "Pending",
-        paymentDate: b.payment_date || "",
-        paymentLogs: Array.isArray(b.payment_logs) ? b.payment_logs : []
-      }));
-      setInvoices(mappedInvoices);
+    } else {
+      const invoicesMap = new Map<string, InvoiceItem>();
+
+      // A. Populate from relational 'invoices' table
+      if (dbInvoices && dbInvoices.length > 0) {
+        dbInvoices.forEach(inv => {
+          const patRecord = dbPatients?.find(p => p.id === inv.patient_id);
+          const firstItem = inv.invoice_items?.[0];
+          const docRecord = dbDoctors?.find(d => d.id === firstItem?.doctor_id);
+
+          const mappedItems = Array.isArray(inv.invoice_items) && inv.invoice_items.length > 0
+            ? inv.invoice_items.map((it: any) => ({
+                description: it.description || "Procedure Item",
+                amount: Number(it.amount) || Number(it.unit_price) * (it.quantity || 1)
+              }))
+            : [{ description: "Treatment & Consultation", amount: Number(inv.total) || 0 }];
+
+          const totalPaid = Array.isArray(inv.payments)
+            ? inv.payments.reduce((sum: number, pay: any) => sum + (Number(pay.amount) || 0), 0)
+            : (inv.status === "Paid" ? Number(inv.total) : 0);
+
+          const payLogs = Array.isArray(inv.payments)
+            ? inv.payments.map((p: any) => ({
+                method: p.payment_method || "Cash",
+                amount: Number(p.amount) || 0,
+                date: p.payment_date || (inv.created_at ? convertToUiDate(inv.created_at.split("T")[0]) : "")
+              }))
+            : [];
+
+          const firstPayDate = payLogs[0]?.date || (inv.status === "Paid" && inv.created_at ? convertToUiDate(inv.created_at.split("T")[0]) : "");
+
+          invoicesMap.set(inv.invoice_id, {
+            id: inv.invoice_id,
+            uuid: inv.id,
+            patientId: patRecord ? patRecord.patient_id : "",
+            patientName: patRecord ? patRecord.name : "Patient",
+            doctor: docRecord ? docRecord.name : (doctors[0]?.name || "Dr. Deepa Kodali"),
+            treatment: firstItem?.description || "Consultation & Treatment",
+            items: mappedItems,
+            discount: Number(inv.discount) || 0,
+            discountType: (inv.discount_type as any) || "percentage",
+            discountValue: Number(inv.discount_value) || 0,
+            tax: Number(inv.tax) || 0,
+            subtotal: Number(inv.subtotal) || 0,
+            total: Number(inv.total) || 0,
+            paidAmount: totalPaid,
+            status: (inv.status as any) || "Pending",
+            paymentDate: firstPayDate,
+            paymentLogs: payLogs
+          });
+        });
+      }
+
+      // B. Merge any legacy 'billing' records not already in invoicesMap
+      if (dbBilling && dbBilling.length > 0) {
+        dbBilling.forEach(b => {
+          if (!invoicesMap.has(b.invoice_id)) {
+            invoicesMap.set(b.invoice_id, {
+              id: b.invoice_id,
+              uuid: b.id,
+              patientId: dbPatients?.find(p => p.id === b.patient_id)?.patient_id || "",
+              patientName: b.patient_name,
+              doctor: b.doctor || "",
+              treatment: b.treatment || "",
+              items: Array.isArray(b.items) ? b.items : [],
+              discount: Number(b.discount) || 0,
+              discountType: b.discount_type || "percentage",
+              discountValue: Number(b.discount_value) || 0,
+              tax: Number(b.tax) || 0,
+              subtotal: Number(b.subtotal) || 0,
+              total: Number(b.total) || 0,
+              paidAmount: Number(b.paid_amount) || 0,
+              status: b.status || "Pending",
+              paymentDate: b.payment_date || "",
+              paymentLogs: Array.isArray(b.payment_logs) ? b.payment_logs : []
+            });
+          }
+        });
+      }
+
+      setInvoices(Array.from(invoicesMap.values()));
     }
 
     // 3. Fetch doctors
@@ -1555,50 +1621,174 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     } catch (err) {
       console.error("Error fetching medicine stock data:", err);
     }
+
+    // 11. Fetch clinic settings from public.clinic_settings
+    try {
+      const { data: dbSettings } = await supabase
+        .from("clinic_settings")
+        .select("*")
+        .limit(1)
+        .maybeSingle();
+
+      if (dbSettings) {
+        if (dbSettings.clinic_name) setClinicName(dbSettings.clinic_name);
+        if (dbSettings.address) setClinicAddress(dbSettings.address);
+        if (dbSettings.receptionist_name) setReceptionistUser(dbSettings.receptionist_name);
+        if (dbSettings.phone) setClinicWebsite(dbSettings.phone);
+      }
+    } catch (settErr) {
+      console.warn("Could not fetch clinic settings from database:", settErr);
+    }
+  };
+
+  const persistInvoiceRecord = async (newInvoice: InvoiceItem): Promise<string | null> => {
+    try {
+      // 1. Resolve Patient Database UUID
+      let dbPatientUuid = patients.find(p => p.id === newInvoice.patientId)?.uuid || null;
+
+      if (!dbPatientUuid && newInvoice.patientId) {
+        const { data: dbPat } = await supabase
+          .from("patients")
+          .select("id")
+          .eq("patient_id", newInvoice.patientId)
+          .maybeSingle();
+        if (dbPat) {
+          dbPatientUuid = dbPat.id;
+        }
+      }
+
+      const subtotalVal = Number(newInvoice.subtotal) || 0;
+      const discountVal = Number(newInvoice.discount) || 0;
+      const discountTypeVal: "percentage" | "fixed" = newInvoice.discountType || "percentage";
+      const discountValueNum = Number(newInvoice.discountValue) || 0;
+      const taxVal = Number(newInvoice.tax) || 0;
+      const totalVal = Number(newInvoice.total) || 0;
+      const statusVal: InvoiceItem["status"] = newInvoice.status || "Unpaid";
+
+      // 2. Insert into relational 'invoices' table
+      const { data: insertedInv, error: invErr } = await supabase
+        .from("invoices")
+        .insert({
+          invoice_id: newInvoice.id,
+          patient_id: dbPatientUuid,
+          subtotal: subtotalVal,
+          discount: discountVal,
+          discount_type: discountTypeVal,
+          discount_value: discountValueNum,
+          tax: taxVal,
+          total: totalVal,
+          status: statusVal
+        })
+        .select()
+        .single();
+
+      if (invErr || !insertedInv) {
+        console.error("Failed to save invoice to invoices table:", invErr?.message, invErr?.code);
+        showToast(`Failed to save invoice: ${invErr?.message || "Database error"}`, "error");
+        return null;
+      }
+
+      const invoiceUuid = insertedInv.id;
+
+      // 3. Insert line items into 'invoice_items' table
+      if (Array.isArray(newInvoice.items) && newInvoice.items.length > 0) {
+        const docRecord = doctors.find(d => d.name === newInvoice.doctor);
+        const itemRows = newInvoice.items.map(it => ({
+          invoice_id: invoiceUuid,
+          description: it.description || newInvoice.treatment || "Procedure Item",
+          quantity: 1,
+          unit_price: Number(it.amount) || 0,
+          amount: Number(it.amount) || 0,
+          doctor_id: docRecord?.id || null
+        }));
+
+        const { error: itemsErr } = await supabase
+          .from("invoice_items")
+          .insert(itemRows);
+
+        if (itemsErr) {
+          console.error("Failed to save invoice items:", itemsErr.message, itemsErr.code);
+        }
+      }
+
+      // 4. Insert payment record into 'payments' table if paidAmount > 0
+      if (Number(newInvoice.paidAmount) > 0) {
+        const rawMethod = newInvoice.paymentLogs?.[0]?.method || "Cash";
+        let normMethod: "Cash" | "UPI" | "Card" = "Cash";
+        if (rawMethod.toLowerCase().includes("upi") || rawMethod.toLowerCase().includes("gpay")) normMethod = "UPI";
+        else if (rawMethod.toLowerCase().includes("card")) normMethod = "Card";
+
+        const payDateStr = newInvoice.paymentDate && newInvoice.paymentDate.includes("-")
+          ? newInvoice.paymentDate
+          : new Date().toISOString().split("T")[0];
+
+        const { error: payErr } = await supabase
+          .from("payments")
+          .insert({
+            invoice_id: invoiceUuid,
+            patient_id: dbPatientUuid,
+            amount: Number(newInvoice.paidAmount),
+            payment_method: normMethod,
+            payment_date: payDateStr,
+            notes: `Payment for ${newInvoice.id} (${rawMethod})`
+          });
+
+        if (payErr) {
+          console.error("Failed to save payment record:", payErr.message, payErr.code);
+        }
+      }
+
+      // 5. Update patient balance on 'patients' table
+      if (newInvoice.patientId) {
+        const remainingBalance = Math.max(0, totalVal - (Number(newInvoice.paidAmount) || 0));
+        await supabase
+          .from("patients")
+          .update({ balance: remainingBalance > 0 ? `₹${remainingBalance.toLocaleString()}` : "₹0" })
+          .eq("patient_id", newInvoice.patientId);
+
+        setPatients(prev => prev.map(p => p.id === newInvoice.patientId ? {
+          ...p,
+          balance: remainingBalance > 0 ? `₹${remainingBalance.toLocaleString()}` : "₹0"
+        } : p));
+      }
+
+      // 6. Mirror to legacy 'billing' table ensuring discount_type is NEVER null
+      try {
+        await supabase
+          .from("billing")
+          .insert({
+            invoice_id: newInvoice.id,
+            patient_id: dbPatientUuid,
+            patient_name: newInvoice.patientName,
+            doctor: newInvoice.doctor,
+            treatment: newInvoice.treatment,
+            items: newInvoice.items,
+            discount: discountVal,
+            discount_type: discountTypeVal,
+            discount_value: discountValueNum,
+            tax: taxVal,
+            subtotal: subtotalVal,
+            total: totalVal,
+            paid_amount: Number(newInvoice.paidAmount) || 0,
+            status: statusVal,
+            payment_date: newInvoice.paymentDate || null,
+            payment_logs: newInvoice.paymentLogs || []
+          });
+      } catch (mirrorErr) {
+        console.warn("Notice: billing mirror insert handled:", mirrorErr);
+      }
+
+      setInvoices(prev => prev.map(inv => inv.id === newInvoice.id ? { ...inv, uuid: invoiceUuid } : inv));
+      return invoiceUuid;
+    } catch (err: any) {
+      console.error("Unexpected error saving invoice:", err);
+      showToast("Unexpected error saving invoice to database.", "error");
+      return null;
+    }
   };
 
   const insertBillingRecord = async (newInvoice: InvoiceItem) => {
-    let dbPatientUuid = patients.find(p => p.id === newInvoice.patientId)?.uuid || null;
-
-    if (!dbPatientUuid) {
-      const { data: dbPat } = await supabase
-        .from("patients")
-        .select("id")
-        .eq("patient_id", newInvoice.patientId)
-        .maybeSingle();
-      if (dbPat) {
-        dbPatientUuid = dbPat.id;
-      }
-    }
-
-    const { data: insertedBill, error } = await supabase
-      .from("billing")
-      .insert({
-        invoice_id: newInvoice.id,
-        patient_id: dbPatientUuid,
-        patient_name: newInvoice.patientName,
-        doctor: newInvoice.doctor,
-        treatment: newInvoice.treatment,
-        items: newInvoice.items,
-        discount: newInvoice.discount,
-        discount_type: newInvoice.discountType || null,
-        discount_value: newInvoice.discountValue || 0,
-        tax: newInvoice.tax,
-        subtotal: newInvoice.subtotal,
-        total: newInvoice.total,
-        paid_amount: newInvoice.paidAmount,
-        status: newInvoice.status,
-        payment_date: newInvoice.paymentDate || null,
-        payment_logs: newInvoice.paymentLogs
-      })
-      .select()
-      .single();
-
-    if (error || !insertedBill) {
-      showToast("Failed to save invoice to billing database.", "error");
-    } else {
-      setInvoices(prev => prev.map(inv => inv.id === newInvoice.id ? { ...inv, uuid: insertedBill.id } : inv));
-    }
+    return persistInvoiceRecord(newInvoice);
   };
 
   useEffect(() => {
@@ -1997,6 +2187,34 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       updateFields.patient_id = dbPatId;
     }
 
+    // 1. Update relational 'invoices' table
+    if (invoiceUuid) {
+      await supabase
+        .from("invoices")
+        .update({
+          subtotal: updatedSubtotal,
+          discount: updatedDiscount,
+          tax: updatedTax,
+          total: finalTotal,
+          status: finalStatus,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", invoiceUuid);
+    } else {
+      await supabase
+        .from("invoices")
+        .update({
+          subtotal: updatedSubtotal,
+          discount: updatedDiscount,
+          tax: updatedTax,
+          total: finalTotal,
+          status: finalStatus,
+          updated_at: new Date().toISOString()
+        })
+        .eq("invoice_id", invoiceId);
+    }
+
+    // 2. Update legacy 'billing' table
     let query = supabase.from("billing").update(updateFields);
 
     if (invoiceUuid) {
@@ -3785,6 +4003,24 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       return;
     }
 
+    // Persist to relational 'prescriptions' table
+    const patDbUuid = patientItem.uuid || patients.find(p => p.id === selectedPatientId)?.uuid;
+    const docDbUuid = doctors.find(d => d.name === docName)?.id || null;
+    if (patDbUuid) {
+      try {
+        await supabase.from("prescriptions").insert({
+          patient_id: patDbUuid,
+          doctor_id: docDbUuid,
+          prescription_date: prescDate || new Date().toISOString().split("T")[0],
+          diagnosis: prescDiagnosis || "Clinical Consultation",
+          advice: prescAdvice || "",
+          medicines: prescMeds
+        });
+      } catch (pErr) {
+        console.warn("Notice: prescriptions table sync:", pErr);
+      }
+    }
+
     setPatients(prev => prev.map(p => {
       if (p.id === selectedPatientId) {
         return {
@@ -3915,6 +4151,22 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       return;
     }
 
+    // Persist to relational 'clinical_notes' table
+    const patDbUuid = patientItem.uuid || patients.find(p => p.id === selectedPatientId)?.uuid;
+    if (patDbUuid) {
+      try {
+        await supabase.from("clinical_notes").insert({
+          patient_id: patDbUuid,
+          author_name: noteAuthor || "Dentist",
+          title: noteTitle.trim(),
+          category: noteCategory || "General",
+          content: noteContent.trim()
+        });
+      } catch (cErr) {
+        console.warn("Notice: clinical_notes table sync:", cErr);
+      }
+    }
+
     setPatients(prev => prev.map(p => {
       if (p.id === selectedPatientId) {
         return {
@@ -3958,6 +4210,8 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       treatment: invProcedure.trim(),
       items: [{ description: invProcedure.trim(), amount: amt }],
       discount: disc,
+      discountType: "percentage",
+      discountValue: disc,
       tax: 0,
       subtotal,
       total,
@@ -3967,13 +4221,24 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       paymentLogs: paid > 0 ? [{ method: invMode, amount: paid, date: new Date().toISOString().split("T")[0] }] : []
     };
 
-    setInvoices(prev => [...prev, newInvoice]);
-    await insertBillingRecord(newInvoice);
+    // Await database persistence before updating state or showing success
+    const savedUuid = await persistInvoiceRecord(newInvoice);
+    if (!savedUuid) {
+      // Error toast already displayed by persistInvoiceRecord
+      return;
+    }
+
+    const confirmedInvoice: InvoiceItem = {
+      ...newInvoice,
+      uuid: savedUuid
+    };
+
+    setInvoices(prev => [confirmedInvoice, ...prev.filter(inv => inv.id !== newInvId)]);
 
     setActivities(prev => [{
       id: `act-${Date.now()}`,
       type: "Billing",
-      msg: `Invoice ${newInvId} generated for ${patientItem.name} (${newInvoice.status}).`,
+      msg: `Invoice ${newInvId} generated for ${patientItem.name} (${confirmedInvoice.status}).`,
       time: "Just now"
     }, ...prev]);
 
@@ -3983,7 +4248,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     setInvTax("0");
     setInvPaid("0");
 
-    showToast("Invoice saved successfully.", "success");
+    showToast(`Invoice ${newInvId} saved successfully.`, "success");
   };
 
   const handleUploadFile = async (e: React.FormEvent) => {
@@ -4921,13 +5186,75 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     const calculatedSubtotal = calculateInvoiceSubtotal();
     const calculatedDiscountPct = calculatedSubtotal > 0 ? Math.round((calculatedDiscountAmt / calculatedSubtotal) * 100) : 0;
 
-    // Write update to Supabase
+    // 1. Resolve database UUIDs
+    let invDbUuid = selectedInvoiceForPayment.uuid;
+    let patDbUuid = patients.find(p => p.id === selectedInvoiceForPayment.patientId)?.uuid;
+
+    if (!invDbUuid || !patDbUuid) {
+      const { data: dbInv } = await supabase
+        .from("invoices")
+        .select("id, patient_id")
+        .eq("invoice_id", selectedInvoiceForPayment.id)
+        .maybeSingle();
+      if (dbInv) {
+        invDbUuid = dbInv.id;
+        if (!patDbUuid) patDbUuid = dbInv.patient_id;
+      }
+    }
+
+    // 2. Update relational 'invoices' table
+    if (invDbUuid) {
+      await supabase
+        .from("invoices")
+        .update({
+          subtotal: calculatedSubtotal,
+          discount: calculatedDiscountPct,
+          discount_type: payDiscountType || "percentage",
+          discount_value: payDiscountValue || 0,
+          total: finalInvoiceTotal,
+          status: finalStatus,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", invDbUuid);
+    }
+
+    // 3. Insert payment log into 'payments' table if payment collected
+    if (collectedTotal > 0 && invDbUuid) {
+      let normPayMethod: "Cash" | "UPI" | "Card" = "Cash";
+      if (paymentMethod.toLowerCase().includes("upi") || paymentMethod.toLowerCase().includes("gpay")) normPayMethod = "UPI";
+      else if (paymentMethod.toLowerCase().includes("card")) normPayMethod = "Card";
+
+      await supabase
+        .from("payments")
+        .insert({
+          invoice_id: invDbUuid,
+          patient_id: patDbUuid || null,
+          amount: collectedTotal,
+          payment_method: normPayMethod,
+          payment_date: new Date().toISOString().split("T")[0],
+          notes: `Collected payment via ${paymentMethod}`
+        });
+    }
+
+    // 4. Insert any newly added custom line items to 'invoice_items' table
+    if (invDbUuid && payCustomItems.length > 0) {
+      const newItems = payCustomItems.map(it => ({
+        invoice_id: invDbUuid,
+        description: it.description,
+        quantity: 1,
+        unit_price: Number(it.amount) || 0,
+        amount: Number(it.amount) || 0
+      }));
+      await supabase.from("invoice_items").insert(newItems);
+    }
+
+    // 5. Update legacy 'billing' table ensuring discount_type is NOT null
     const { error: billErr } = await supabase
       .from("billing")
       .update({
         items: [...selectedInvoiceForPayment.items, ...payCustomItems],
         discount: calculatedDiscountPct,
-        discount_type: payDiscountType || null,
+        discount_type: payDiscountType || "percentage",
         discount_value: payDiscountValue || 0,
         subtotal: calculatedSubtotal,
         total: finalInvoiceTotal,
@@ -4939,8 +5266,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       .eq("invoice_id", selectedInvoiceForPayment.id);
 
     if (billErr) {
-      showToast("Failed to update billing details in database.", "error");
-      return;
+      console.warn("Notice: billing update warning:", billErr.message);
     }
 
     // Apply balance update to patient directory record
@@ -9911,16 +10237,45 @@ ${clinicName}`;
                               {inv.status !== "Paid" && (
                                 <button
                                   onClick={async () => {
-                                    const { error } = await supabase
+                                    // 1. Resolve UUIDs
+                                    let invUuid = inv.uuid;
+                                    let patUuid = patients.find(p => p.id === inv.patientId)?.uuid;
+                                    if (!invUuid) {
+                                      const { data: dbInv } = await supabase.from("invoices").select("id, patient_id").eq("invoice_id", inv.id).maybeSingle();
+                                      if (dbInv) {
+                                        invUuid = dbInv.id;
+                                        if (!patUuid) patUuid = dbInv.patient_id;
+                                      }
+                                    }
+
+                                    // 2. Update relational invoices table
+                                    if (invUuid) {
+                                      await supabase
+                                        .from("invoices")
+                                        .update({ status: "Paid", updated_at: new Date().toISOString() })
+                                        .eq("id", invUuid);
+
+                                      // Insert payment record
+                                      const unpaidPortion = Math.max(0, inv.total - (inv.paidAmount || 0));
+                                      if (unpaidPortion > 0) {
+                                        await supabase.from("payments").insert({
+                                          invoice_id: invUuid,
+                                          patient_id: patUuid || null,
+                                          amount: unpaidPortion,
+                                          payment_method: "Cash",
+                                          payment_date: new Date().toISOString().split("T")[0],
+                                          notes: "Marked Paid full settlement"
+                                        });
+                                      }
+                                    }
+
+                                    // 3. Update legacy billing table
+                                    await supabase
                                       .from("billing")
                                       .update({ status: "Paid", paid_amount: inv.total, payment_date: new Date().toISOString().split("T")[0] })
                                       .eq("invoice_id", inv.id);
 
-                                    if (error) {
-                                      showToast("Failed to update payment status in database.", "error");
-                                      return;
-                                    }
-
+                                    // 4. Update patient balance
                                     await supabase
                                       .from("patients")
                                       .update({ balance: "₹0" })
@@ -13064,7 +13419,7 @@ ${clinicName}`;
       setDoctorModalOpen(true);
     };
 
-    const handleSaveClinicSettings = (e?: React.FormEvent) => {
+    const handleSaveClinicSettings = async (e?: React.FormEvent) => {
       if (e) e.preventDefault();
       if (!clinicName.trim()) {
         showToast("Please enter a clinic name.", "error");
@@ -13080,16 +13435,36 @@ ${clinicName}`;
       }
 
       try {
+        const { error: setErr } = await supabase
+          .from("clinic_settings")
+          .update({
+            clinic_name: clinicName.trim(),
+            address: clinicAddress.trim(),
+            receptionist_name: receptionistUser.trim(),
+            phone: clinicWebsite.trim() || null,
+            updated_at: new Date().toISOString()
+          })
+          .eq("singleton_guard", true);
+
+        if (setErr) {
+          console.error("Failed to persist clinic settings:", setErr.message);
+          showToast(`Failed to save settings: ${setErr.message}`, "error");
+          return;
+        }
+
         const settingsObj = {
           clinicName: clinicName.trim(),
           receptionistUser: receptionistUser.trim(),
           clinicAddress: clinicAddress.trim(),
           clinicWebsite: clinicWebsite.trim()
         };
-        localStorage.setItem("clinic_settings", JSON.stringify(settingsObj));
-        showToast("Clinic configurations saved.", "success");
-      } catch (err) {
-        showToast("Failed to save clinic configurations.", "error");
+        try {
+          localStorage.setItem("clinic_settings", JSON.stringify(settingsObj));
+        } catch (_) {}
+
+        showToast("Clinic configurations saved successfully.", "success");
+      } catch (err: any) {
+        showToast("Failed to save clinic configurations: " + (err.message || err), "error");
       }
     };
 
