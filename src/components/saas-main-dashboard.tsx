@@ -1271,8 +1271,9 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
   };
 
   const fetchClinicData = async () => {
-    // 1. Fetch patients
-    const { data: dbPatients, error: patErr } = await supabase
+    try {
+      // 1. Fetch patients
+      const { data: dbPatients, error: patErr } = await supabase
       .from("patients")
       .select("*")
       .order("created_at", { ascending: false });
@@ -1318,7 +1319,27 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       setPatients(mappedPatients);
     }
 
-    // 2. Fetch billing / invoices from existing 'invoices' table with relational line items & payments
+    // 2. Fetch doctors (MUST BE RETRIEVED BEFORE INVOICES & APPOINTMENTS TO PREVENT TDZ REFERENCE ERROR)
+    const { data: dbDoctors, error: docErr } = await supabase
+      .from("doctors")
+      .select("*")
+      .order("created_at", { ascending: true });
+
+    if (docErr) {
+      console.error("Failed to load doctors from database:", docErr.message, docErr.code);
+      showToast("Error loading doctors from database.", "error");
+    } else if (dbDoctors) {
+      const mappedDoctors: Doctor[] = dbDoctors.map(d => ({
+        id: d.id,
+        name: d.name,
+        speciality: d.specialty || "",
+        status: (d.status === "Available" || d.status === "In Consultation" || d.status === "On Break" || d.status === "Finished Today") ? d.status : "Available",
+        phone: d.phone || ""
+      }));
+      setDoctors(mappedDoctors);
+    }
+
+    // 3. Fetch billing / invoices from existing 'invoices' table with relational line items & payments
     const { data: dbInvoices, error: invErr } = await supabase
       .from("invoices")
       .select("*, invoice_items(*), payments(*)")
@@ -1413,26 +1434,6 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       }
 
       setInvoices(Array.from(invoicesMap.values()));
-    }
-
-    // 3. Fetch doctors
-    const { data: dbDoctors, error: docErr } = await supabase
-      .from("doctors")
-      .select("*")
-      .order("created_at", { ascending: true });
-
-    if (docErr) {
-      console.error("Failed to load doctors from database:", docErr.message, docErr.code);
-      showToast("Error loading doctors from database.", "error");
-    } else if (dbDoctors) {
-      const mappedDoctors: Doctor[] = dbDoctors.map(d => ({
-        id: d.id,
-        name: d.name,
-        speciality: d.specialty || "",
-        status: (d.status === "Available" || d.status === "In Consultation" || d.status === "On Break" || d.status === "Finished Today") ? d.status : "Available",
-        phone: d.phone || ""
-      }));
-      setDoctors(mappedDoctors);
     }
 
     // 4. Fetch appointments
@@ -1639,7 +1640,10 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     } catch (settErr) {
       console.warn("Could not fetch clinic settings from database:", settErr);
     }
-  };
+  } catch (err: any) {
+    console.error("Critical error inside fetchClinicData:", err);
+  }
+};
 
   const persistInvoiceRecord = async (newInvoice: InvoiceItem): Promise<string | null> => {
     try {
@@ -1792,77 +1796,104 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
   };
 
   useEffect(() => {
+    let isMounted = true;
+    let authSubscription: { unsubscribe: () => void } | null = null;
+
     const handleSessionSuccess = async (session: any) => {
-      let { data: profile, error: profileErr } = await supabase
-        .from("profiles")
-        .select("id, role, full_name, status")
-        .eq("id", session.user.id)
-        .maybeSingle();
-
-      if (profileErr) {
-        showToast("Error retrieving user profile.", "error");
-        setLoadingSession(false);
-        return;
-      }
-
-      if (profile?.status === "Inactive") {
-        await supabase.auth.signOut();
-        showToast("Your account is pending Owner activation or has been deactivated.", "error");
-        setLoadingSession(false);
-        router.push("/login");
-        return;
-      }
-
-      if (!profile) {
-        const defaultName = session.user?.user_metadata?.full_name || session.user?.email?.split("@")[0] || "Owner / Dentist";
-        const { error: insertProfileErr } = await supabase
+      try {
+        let { data: profile, error: profileErr } = await supabase
           .from("profiles")
-          .insert({
-            id: session.user.id,
-            role: "owner",
-            full_name: defaultName,
-            status: "Active"
-          });
+          .select("id, role, full_name, status")
+          .eq("id", session.user.id)
+          .maybeSingle();
 
-        if (insertProfileErr) {
-          showToast("Error provisioning user profile.", "error");
+        if (!isMounted) return;
+
+        if (profileErr) {
+          showToast("Error retrieving user profile.", "error");
           setLoadingSession(false);
           return;
         }
-        setUserRole("owner");
-        setCurrentUserName(defaultName);
-      } else {
-        const canonicalRole = profile.role === "receptionist" ? "receptionist" : "owner";
-        setUserRole(canonicalRole);
-        const resolvedName = profile.full_name || session.user?.user_metadata?.full_name || session.user?.email?.split("@")[0] || (canonicalRole === "owner" ? "Owner / Dentist" : "Receptionist");
-        setCurrentUserName(resolvedName);
-      }
 
-      await fetchClinicData();
-      setLoadingSession(false);
+        if (profile?.status === "Inactive") {
+          await supabase.auth.signOut();
+          showToast("Your account is pending Owner activation or has been deactivated.", "error");
+          setLoadingSession(false);
+          router.push("/login");
+          return;
+        }
+
+        if (!profile) {
+          const defaultName = session.user?.user_metadata?.full_name || session.user?.email?.split("@")[0] || "Owner / Dentist";
+          const { error: insertProfileErr } = await supabase
+            .from("profiles")
+            .insert({
+              id: session.user.id,
+              role: "owner",
+              full_name: defaultName,
+              status: "Active"
+            });
+
+          if (!isMounted) return;
+
+          if (insertProfileErr) {
+            showToast("Error provisioning user profile.", "error");
+            setLoadingSession(false);
+            return;
+          }
+          setUserRole("owner");
+          setCurrentUserName(defaultName);
+        } else {
+          const canonicalRole = profile.role === "receptionist" ? "receptionist" : "owner";
+          setUserRole(canonicalRole);
+          const resolvedName = profile.full_name || session.user?.user_metadata?.full_name || session.user?.email?.split("@")[0] || (canonicalRole === "owner" ? "Owner / Dentist" : "Receptionist");
+          setCurrentUserName(resolvedName);
+        }
+
+        await fetchClinicData();
+      } catch (err) {
+        console.error("Error in handleSessionSuccess:", err);
+      } finally {
+        if (isMounted) {
+          setLoadingSession(false);
+        }
+      }
     };
 
     const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        router.push("/login");
-      } else {
-        await handleSessionSuccess(session);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!isMounted) return;
+        if (!session) {
+          setLoadingSession(false);
+          router.push("/login");
+        } else {
+          await handleSessionSuccess(session);
+        }
+      } catch (err) {
+        console.error("Error checking session:", err);
+        if (isMounted) {
+          setLoadingSession(false);
+        }
       }
     };
 
     checkSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (!session) {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!isMounted) return;
+      if (event === "SIGNED_OUT") {
+        setLoadingSession(false);
         router.push("/login");
-      } else {
+      } else if (session && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED")) {
         await handleSessionSuccess(session);
       }
     });
+    authSubscription = subscription;
 
     return () => {
-      subscription.unsubscribe();
+      isMounted = false;
+      authSubscription?.unsubscribe();
     };
   }, [router, supabase]);
 
