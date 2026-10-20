@@ -80,7 +80,7 @@ import { Label } from "@/components/ui/label";
 import { DentalLogo } from "@/components/dental-logo";
 import { OfficialSameekshaCaseSheet } from "@/components/OfficialSameekshaCaseSheet";
 import { OfficialSameekshaPrescription } from "@/components/OfficialSameekshaPrescription";
-import { OfficialSameekshaInvoice } from "@/components/OfficialSameekshaInvoice";
+import { OfficialSameekshaInvoice, InvoiceLineItem } from "@/components/OfficialSameekshaInvoice";
 import { downloadSameekshaPrescriptionPDF } from "@/lib/prescriptionPdfGenerator";
 import { downloadSameekshaInvoicePDF } from "@/lib/invoicePdfGenerator";
 import { createClient } from "@/lib/supabase/client";
@@ -209,7 +209,7 @@ interface InvoiceItem {
   patientName: string;
   doctor: string;
   treatment: string;
-  items: { description: string; amount: number }[];
+  items: InvoiceLineItem[];
   discount: number; // in percentage
   discountType?: "percentage" | "fixed";
   discountValue?: number;
@@ -1365,12 +1365,26 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
           const firstItem = inv.invoice_items?.[0];
           const docRecord = dbDoctors?.find(d => d.id === firstItem?.doctor_id);
 
-          const mappedItems = Array.isArray(inv.invoice_items) && inv.invoice_items.length > 0
-            ? inv.invoice_items.map((it: any) => ({
-                description: it.description || "Procedure Item",
-                amount: Number(it.amount) || Number(it.unit_price) * (it.quantity || 1)
-              }))
-            : [{ description: "Treatment & Consultation", amount: Number(inv.total) || 0 }];
+          const mappedItems: InvoiceLineItem[] = Array.isArray(inv.invoice_items) && inv.invoice_items.length > 0
+            ? inv.invoice_items.map((it: any) => {
+                const qty = Number(it.quantity) || 1;
+                const uPrice = Number(it.unit_price) || (Number(it.amount) / qty) || 0;
+                const lineAmt = Number(it.amount) || (qty * uPrice);
+                return {
+                  description: it.description || "Procedure Item",
+                  quantity: qty,
+                  unitPrice: uPrice,
+                  amount: lineAmt
+                };
+              })
+            : [{
+                description: inv.treatment || "Treatment & Consultation",
+                quantity: 1,
+                unitPrice: Number(inv.total) || 0,
+                amount: Number(inv.total) || 0
+              }];
+
+          const allTreatmentsSummary = mappedItems.map(it => it.description).filter(Boolean).join(", ") || firstItem?.description || "Consultation & Treatment";
 
           const totalPaid = Array.isArray(inv.payments)
             ? inv.payments.reduce((sum: number, pay: any) => sum + (Number(pay.amount) || 0), 0)
@@ -1391,14 +1405,14 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
             uuid: inv.id,
             patientId: patRecord ? patRecord.patient_id : "",
             patientName: patRecord ? patRecord.name : "Patient",
-            doctor: docRecord ? docRecord.name : (doctors[0]?.name || "Dr. Deepa Kodali"),
-            treatment: firstItem?.description || "Consultation & Treatment",
+            doctor: docRecord ? docRecord.name : (doctors[0]?.name || "Dr. Suvarna Raju. P"),
+            treatment: allTreatmentsSummary,
             items: mappedItems,
             discount: Number(inv.discount) || 0,
             discountType: (inv.discount_type as any) || "percentage",
             discountValue: Number(inv.discount_value) || 0,
             tax: Number(inv.tax) || 0,
-            subtotal: Number(inv.subtotal) || 0,
+            subtotal: Number(inv.subtotal) || mappedItems.reduce((acc, it) => acc + it.amount, 0),
             total: Number(inv.total) || 0,
             paidAmount: totalPaid,
             status: (inv.status as any) || "Pending",
@@ -1412,19 +1426,38 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       if (dbBilling && dbBilling.length > 0) {
         dbBilling.forEach(b => {
           if (!invoicesMap.has(b.invoice_id)) {
+            const mappedBillingItems: InvoiceLineItem[] = Array.isArray(b.items) && b.items.length > 0
+              ? b.items.map((it: any) => {
+                  const qty = Number(it.quantity) || 1;
+                  const uPrice = Number(it.unitPrice !== undefined ? it.unitPrice : it.unit_price) || (Number(it.amount) / qty) || 0;
+                  const lineAmt = Number(it.amount) || (qty * uPrice);
+                  return {
+                    description: it.description || "Procedure Item",
+                    quantity: qty,
+                    unitPrice: uPrice,
+                    amount: lineAmt
+                  };
+                })
+              : [{
+                  description: b.treatment || "Consultation & Treatment",
+                  quantity: 1,
+                  unitPrice: Number(b.total || b.subtotal || 0),
+                  amount: Number(b.total || b.subtotal || 0)
+                }];
+
             invoicesMap.set(b.invoice_id, {
               id: b.invoice_id,
               uuid: b.id,
               patientId: dbPatients?.find(p => p.id === b.patient_id)?.patient_id || "",
               patientName: b.patient_name,
               doctor: b.doctor || "",
-              treatment: b.treatment || "",
-              items: Array.isArray(b.items) ? b.items : [],
+              treatment: b.treatment || mappedBillingItems.map(i => i.description).join(", "),
+              items: mappedBillingItems,
               discount: Number(b.discount) || 0,
               discountType: b.discount_type || "percentage",
               discountValue: Number(b.discount_value) || 0,
               tax: Number(b.tax) || 0,
-              subtotal: Number(b.subtotal) || 0,
+              subtotal: Number(b.subtotal) || mappedBillingItems.reduce((acc, it) => acc + it.amount, 0),
               total: Number(b.total) || 0,
               paidAmount: Number(b.paid_amount) || 0,
               status: b.status || "Pending",
@@ -1699,14 +1732,19 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       // 3. Insert line items into 'invoice_items' table
       if (Array.isArray(newInvoice.items) && newInvoice.items.length > 0) {
         const docRecord = doctors.find(d => d.name === newInvoice.doctor);
-        const itemRows = newInvoice.items.map(it => ({
-          invoice_id: invoiceUuid,
-          description: it.description || newInvoice.treatment || "Procedure Item",
-          quantity: 1,
-          unit_price: Number(it.amount) || 0,
-          amount: Number(it.amount) || 0,
-          doctor_id: docRecord?.id || null
-        }));
+        const itemRows = newInvoice.items.map(it => {
+          const qty = Number(it.quantity) || 1;
+          const uPrice = Number(it.unitPrice !== undefined ? it.unitPrice : it.amount) || 0;
+          const lineAmt = Number(it.amount) || (qty * uPrice);
+          return {
+            invoice_id: invoiceUuid,
+            description: it.description || newInvoice.treatment || "Procedure Item",
+            quantity: qty,
+            unit_price: uPrice,
+            amount: lineAmt,
+            doctor_id: docRecord?.id || null
+          };
+        });
 
         const { error: itemsErr } = await supabase
           .from("invoice_items")
@@ -1714,6 +1752,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
 
         if (itemsErr) {
           console.error("Failed to save invoice items:", itemsErr.message, itemsErr.code);
+          showToast(`Warning: Failed to save invoice items: ${itemsErr.message}`, "error");
         }
       }
 
@@ -2995,12 +3034,18 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     { name: "", dosage: "", freq: "", duration: "", instructions: "" }
   ]);
 
-  // --- INVOICE FORM STATES ---
+  // --- MULTI-TREATMENT INVOICE FORM STATES ---
+  const [invoiceFormPatientId, setInvoiceFormPatientId] = useState<string>("");
+  const [invoiceRows, setInvoiceRows] = useState<{ id: string; treatment: string; customName?: string; quantity: number; unitPrice: number }[]>([
+    { id: "row-1", treatment: "", quantity: 1, unitPrice: 0 }
+  ]);
   const [invProcedure, setInvProcedure] = useState("");
   const [invAmount, setInvAmount] = useState("");
   const [invDiscount, setInvDiscount] = useState("0");
+  const [invDiscountType, setInvDiscountType] = useState<"percentage" | "fixed">("percentage");
   const [invTax, setInvTax] = useState("0");
   const [invPaid, setInvPaid] = useState("0");
+  const [isCreateInvoiceModalOpen, setIsCreateInvoiceModalOpen] = useState(false);
 
   const getPatientBalance = (patientId: string): number => {
     const patInvoices = invoices.filter(inv => inv.patientId === patientId || inv.patientName === patientId);
@@ -4239,22 +4284,105 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     showToast("Clinical note saved successfully.", "success");
   };
 
-  const handleSaveInvoice = async (e: React.FormEvent) => {
+  const handleAddTreatmentRow = () => {
+    setInvoiceRows(prev => [
+      ...prev,
+      { id: `row-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, treatment: "", quantity: 1, unitPrice: 0 }
+    ]);
+  };
+
+  const handleRemoveTreatmentRow = (rowId: string) => {
+    setInvoiceRows(prev => {
+      const filtered = prev.filter(r => r.id !== rowId);
+      return filtered.length > 0 ? filtered : [{ id: `row-${Date.now()}`, treatment: "", quantity: 1, unitPrice: 0 }];
+    });
+  };
+
+  const handleUpdateTreatmentRow = (rowId: string, field: "treatment" | "customName" | "quantity" | "unitPrice", value: any) => {
+    setInvoiceRows(prev => prev.map(r => {
+      if (r.id !== rowId) return r;
+      if (field === "treatment") {
+        const trName = String(value);
+        let suggestedPrice = r.unitPrice;
+        if (suggestedPrice === 0) {
+          if (trName === "Consultation") suggestedPrice = 500;
+          else if (trName === "Scaling") suggestedPrice = 1200;
+          else if (trName === "Root Canal") suggestedPrice = 4000;
+          else if (trName === "Extraction") suggestedPrice = 1500;
+          else if (trName === "Filling") suggestedPrice = 1000;
+          else if (trName === "Implant") suggestedPrice = 25000;
+          else if (trName === "Crown") suggestedPrice = 5000;
+          else if (trName === "Braces") suggestedPrice = 30000;
+        }
+        return { ...r, treatment: trName, unitPrice: suggestedPrice };
+      }
+      return { ...r, [field]: value };
+    }));
+  };
+
+  const calculateInvoiceFormSubtotal = () => {
+    return invoiceRows.reduce((sum, r) => {
+      const qty = Math.max(1, Number(r.quantity) || 1);
+      const price = Math.max(0, Number(r.unitPrice) || 0);
+      return sum + (qty * price);
+    }, 0);
+  };
+
+  const calculateInvoiceFormDiscount = (sub: number) => {
+    const val = Number(invDiscount) || 0;
+    return invDiscountType === "fixed" ? val : (sub * val) / 100;
+  };
+
+  const calculateInvoiceFormTotal = () => {
+    const sub = calculateInvoiceFormSubtotal();
+    const disc = calculateInvoiceFormDiscount(sub);
+    return Math.max(0, Math.round(sub - disc));
+  };
+
+  const handleSaveInvoice = async (e: React.FormEvent, customPatientId?: string) => {
     e.preventDefault();
-    if (!invProcedure.trim() || !invAmount) {
-      showToast("Procedure and Amount are required.", "error");
+    const patId = customPatientId || invoiceFormPatientId || selectedPatientId;
+    const patientItem = patients.find(p => p.id === patId);
+    if (!patientItem) {
+      showToast("Please select a valid patient.", "error");
       return;
     }
-    const patientItem = patients.find(p => p.id === selectedPatientId);
-    if (!patientItem) return;
 
-    const amt = Number(invAmount) || 0;
-    const disc = Number(invDiscount) || 0;
-    const paid = Number(invPaid) || 0;
+    // Filter valid treatment rows
+    const validRows = invoiceRows
+      .map(r => {
+        const desc = r.treatment === "Other" && r.customName ? r.customName.trim() : r.treatment.trim();
+        const qty = Math.max(1, Number(r.quantity) || 1);
+        const unitPrice = Math.max(0, Number(r.unitPrice) || 0);
+        return {
+          description: desc,
+          quantity: qty,
+          unitPrice,
+          amount: qty * unitPrice
+        };
+      })
+      .filter(r => r.description && (r.amount > 0 || r.unitPrice > 0));
 
-    const discountAmount = amt * (disc / 100);
-    const subtotal = amt - discountAmount;
-    const total = subtotal;
+    // Fallback if legacy single fields were somehow used
+    if (validRows.length === 0 && invProcedure.trim() && Number(invAmount) > 0) {
+      validRows.push({
+        description: invProcedure.trim(),
+        quantity: 1,
+        unitPrice: Number(invAmount),
+        amount: Number(invAmount)
+      });
+    }
+
+    if (validRows.length === 0) {
+      showToast("Please enter at least one treatment and price.", "error");
+      return;
+    }
+
+    const subtotal = validRows.reduce((sum, r) => sum + r.amount, 0);
+    const discVal = Number(invDiscount) || 0;
+    const discAmt = invDiscountType === "fixed" ? discVal : (subtotal * discVal) / 100;
+    const total = Math.max(0, Math.round(subtotal - discAmt));
+    const paid = Math.min(total, Math.max(0, Number(invPaid) || 0));
     const pending = Math.max(0, total - paid);
 
     const newInvId = `INV-${Date.now().toString().slice(-4)}`;
@@ -4262,12 +4390,12 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       id: newInvId,
       patientId: patientItem.id,
       patientName: patientItem.name,
-      doctor: doctors[0]?.name || "Dr. Deepa Kodali",
-      treatment: invProcedure.trim(),
-      items: [{ description: invProcedure.trim(), amount: amt }],
-      discount: disc,
-      discountType: "percentage",
-      discountValue: disc,
+      doctor: doctors[0]?.name || "Dr. Suvarna Raju. P",
+      treatment: validRows.map(r => r.description).join(", "),
+      items: validRows,
+      discount: invDiscountType === "percentage" ? discVal : 0,
+      discountType: invDiscountType,
+      discountValue: discVal,
       tax: 0,
       subtotal,
       total,
@@ -4277,10 +4405,8 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       paymentLogs: paid > 0 ? [{ method: invMode, amount: paid, date: new Date().toISOString().split("T")[0] }] : []
     };
 
-    // Await database persistence before updating state or showing success
     const savedUuid = await persistInvoiceRecord(newInvoice);
     if (!savedUuid) {
-      // Error toast already displayed by persistInvoiceRecord
       return;
     }
 
@@ -4294,17 +4420,21 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     setActivities(prev => [{
       id: `act-${Date.now()}`,
       type: "Billing",
-      msg: `Invoice ${newInvId} generated for ${patientItem.name} (${confirmedInvoice.status}).`,
+      msg: `Invoice ${newInvId} generated for ${patientItem.name} (${confirmedInvoice.status}) with ${validRows.length} treatments.`,
       time: "Just now"
     }, ...prev]);
 
+    // Reset fields
+    setInvoiceRows([{ id: `row-${Date.now()}`, treatment: "", quantity: 1, unitPrice: 0 }]);
     setInvProcedure("");
     setInvAmount("");
     setInvDiscount("0");
     setInvTax("0");
     setInvPaid("0");
+    setIsCreateInvoiceModalOpen(false);
 
-    showToast(`Invoice ${newInvId} saved successfully.`, "success");
+    showToast(`Invoice ${newInvId} saved successfully with ${validRows.length} treatments.`, "success");
+    setLastGeneratedReceipt(confirmedInvoice);
   };
 
   const handleUploadFile = async (e: React.FormEvent) => {
@@ -10204,56 +10334,200 @@ ${clinicName}`;
 
             {profileSubTab === "Invoices" && (
               <div className="space-y-6 animate-fadeIn">
-                {/* Billing invoice creation form */}
-                <form onSubmit={handleSaveInvoice} className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs space-y-4 text-xs">
-                  <span className="font-bold text-sm block border-b pb-2 mb-2">Create New Billing Invoice</span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                {/* Multi-Treatment Billing Invoice Creation Form */}
+                <form onSubmit={(e) => handleSaveInvoice(e, selectedPatientId)} className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs space-y-4 text-xs">
+                  <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-2 mb-2">
                     <div>
-                      <Label>Procedure / Item</Label>
-                      <select
-                        className="flex h-9 w-full rounded-md border border-slate-200 bg-transparent px-3 py-1 text-xs focus:outline-none dark:border-slate-800 dark:bg-slate-900"
-                        value={invProcedure}
-                        onChange={e => {
-                          setInvProcedure(e.target.value);
-                        }}
-                        required
-                      >
-                        <option value="">-- Choose Procedure --</option>
-                        {COMMON_TREATMENTS.map(t => (
-                          <option key={t} value={t}>{t}</option>
+                      <span className="font-bold text-sm text-slate-900 dark:text-white block">Create Multi-Treatment Invoice</span>
+                      <p className="text-[11px] text-slate-500">Add multiple treatments, adjust quantities and unit prices, apply discounts and record payment</p>
+                    </div>
+                  </div>
+
+                  {/* Treatments Line Items Table */}
+                  <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-x-auto scrollbar-thin">
+                    <table className="w-full min-w-[580px] text-left text-xs">
+                      <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-[10px] uppercase font-bold text-slate-500">
+                        <tr>
+                          <th className="py-2 px-2.5 w-10 text-center">#</th>
+                          <th className="py-2 px-3 min-w-[200px]">Treatment / Procedure</th>
+                          <th className="py-2 px-2 w-20 text-center">Qty</th>
+                          <th className="py-2 px-3 w-32 text-right">Unit Price (₹)</th>
+                          <th className="py-2 px-3 w-32 text-right">Line Total (₹)</th>
+                          <th className="py-2 px-2 w-12 text-center">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-900">
+                        {invoiceRows.map((row, idx) => (
+                          <tr key={row.id}>
+                            <td className="py-2 px-2.5 text-center font-bold text-slate-500">{idx + 1}</td>
+                            <td className="py-2 px-3">
+                              <div className="space-y-1">
+                                <select
+                                  value={row.treatment}
+                                  onChange={e => handleUpdateTreatmentRow(row.id, "treatment", e.target.value)}
+                                  className="w-full h-8 px-2 rounded border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-semibold focus:outline-none"
+                                  required
+                                >
+                                  <option value="">-- Choose Treatment --</option>
+                                  {COMMON_TREATMENTS.map(t => (
+                                    <option key={t} value={t}>{t}</option>
+                                  ))}
+                                  <option value="Other">Other (Custom Procedure)</option>
+                                </select>
+                                {row.treatment === "Other" && (
+                                  <Input
+                                    placeholder="Enter custom procedure name..."
+                                    value={row.customName || ""}
+                                    onChange={e => handleUpdateTreatmentRow(row.id, "customName", e.target.value)}
+                                    className="h-8 text-xs font-semibold"
+                                    required
+                                  />
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-2 px-2">
+                              <Input
+                                type="number"
+                                min="1"
+                                value={row.quantity}
+                                onChange={e => handleUpdateTreatmentRow(row.id, "quantity", Math.max(1, Number(e.target.value) || 1))}
+                                className="h-8 text-center text-xs font-semibold"
+                              />
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              <Input
+                                type="number"
+                                min="0"
+                                value={row.unitPrice}
+                                onChange={e => handleUpdateTreatmentRow(row.id, "unitPrice", Math.max(0, Number(e.target.value) || 0))}
+                                className="h-8 text-right text-xs font-semibold"
+                              />
+                            </td>
+                            <td className="py-2 px-3 text-right font-bold text-slate-900 dark:text-white">
+                              ₹{((Number(row.quantity) || 1) * (Number(row.unitPrice) || 0)).toLocaleString()}
+                            </td>
+                            <td className="py-2 px-2 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveTreatmentRow(row.id)}
+                                disabled={invoiceRows.length === 1}
+                                className={`p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-950/40 text-red-500 transition-colors ${invoiceRows.length === 1 ? "opacity-30 cursor-not-allowed" : "cursor-pointer"}`}
+                                title="Remove Treatment"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </td>
+                          </tr>
                         ))}
-                      </select>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="flex justify-start">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleAddTreatmentRow}
+                      className="h-8 px-3 text-xs font-semibold border-dashed border-blue-400 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Add Treatment
+                    </Button>
+                  </div>
+
+                  {/* Financial Calculations & Payment Row */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Discount</Label>
+                          <div className="flex gap-1.5 mt-1">
+                            <Input
+                              type="number"
+                              min="0"
+                              value={invDiscount}
+                              onChange={e => setInvDiscount(e.target.value)}
+                              className="h-8 text-xs font-semibold"
+                            />
+                            <select
+                              value={invDiscountType}
+                              onChange={e => setInvDiscountType(e.target.value as any)}
+                              className="h-8 px-2 rounded border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-semibold"
+                            >
+                              <option value="percentage">%</option>
+                              <option value="fixed">₹</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <Label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Paid Amount (₹)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            value={invPaid}
+                            onChange={e => setInvPaid(e.target.value)}
+                            className="h-8 mt-1 text-xs font-semibold"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <Label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Payment Mode</Label>
+                        <select
+                          value={invMode}
+                          onChange={e => setInvMode(e.target.value)}
+                          className="w-full h-8 mt-1 px-2.5 rounded border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-semibold"
+                        >
+                          <option value="UPI GPay">UPI / GPay</option>
+                          <option value="Cash">Cash</option>
+                          <option value="Card Swipe">Card</option>
+                          <option value="Bank Transfer">Net Banking</option>
+                        </select>
+                      </div>
                     </div>
-                    <div>
-                      <Label>Procedure Amount (₹)</Label>
-                      <Input type="number" value={invAmount} onChange={e => setInvAmount(e.target.value)} required />
-                    </div>
-                    <div>
-                      <Label>Discount (%)</Label>
-                      <Input type="number" min="0" max="100" value={invDiscount} onChange={e => setInvDiscount(e.target.value)} />
+
+                    {/* Summary Box */}
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
+                      <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+                        <span>Subtotal:</span>
+                        <span className="font-semibold text-slate-800 dark:text-slate-200">
+                          ₹{calculateInvoiceFormSubtotal().toLocaleString()}
+                        </span>
+                      </div>
+                      {Number(invDiscount) > 0 && (
+                        <div className="flex justify-between items-center text-red-600 dark:text-red-400">
+                          <span>Discount {invDiscountType === "percentage" ? `(${invDiscount}%)` : `(Fixed)`}:</span>
+                          <span className="font-semibold">
+                            -₹{calculateInvoiceFormDiscount(calculateInvoiceFormSubtotal()).toLocaleString()}
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex justify-between items-center text-sm font-bold text-slate-900 dark:text-white pt-2 border-t border-slate-200 dark:border-slate-800">
+                        <span>Total Payable:</span>
+                        <span className="text-base text-blue-600 dark:text-blue-400">
+                          ₹{calculateInvoiceFormTotal().toLocaleString()}
+                        </span>
+                      </div>
+                      {Number(invPaid) > 0 && (
+                        <div className="flex justify-between items-center text-[11px] pt-1">
+                          <span className="text-emerald-600 font-semibold">Paid: ₹{Number(invPaid).toLocaleString()}</span>
+                          <span className={Math.max(0, calculateInvoiceFormTotal() - Number(invPaid)) > 0 ? "text-amber-600 font-semibold" : "text-emerald-600 font-semibold"}>
+                            {Math.max(0, calculateInvoiceFormTotal() - Number(invPaid)) > 0
+                              ? `Balance: ₹${Math.max(0, calculateInvoiceFormTotal() - Number(invPaid)).toLocaleString()}`
+                              : "✓ Paid in Full"}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <Label>Paid Amount (₹)</Label>
-                      <Input type="number" min="0" value={invPaid} onChange={e => setInvPaid(e.target.value)} />
-                    </div>
-                    <div>
-                      <Label>Payment Mode</Label>
-                      <select
-                        className="flex h-9 w-full rounded-md border border-slate-200 bg-transparent px-3 py-1 text-xs focus:outline-none dark:border-slate-800 dark:bg-slate-900"
-                        value={invMode}
-                        onChange={e => setInvMode(e.target.value)}
-                      >
-                        <option value="UPI GPay">UPI / GPay</option>
-                        <option value="Cash">Cash</option>
-                        <option value="Card Swipe">Card</option>
-                        <option value="Bank Transfer">Net Banking</option>
-                      </select>
-                    </div>
-                  </div>
+
                   <div className="flex justify-end gap-3 pt-2">
-                    <Button type="submit" className="h-9 px-4 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded">Save Invoice</Button>
+                    <Button
+                      type="submit"
+                      className="h-9 px-5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded shadow-xs cursor-pointer"
+                    >
+                      Save & Generate Invoice
+                    </Button>
                   </div>
                 </form>
 
@@ -12028,86 +12302,111 @@ ${clinicName}`;
   const renderBillingModule = () => (
     <div className="space-y-6 animate-fadeIn">
       {activeSubTab === "Invoices" && (
-        <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs overflow-x-auto scrollbar-thin">
-          <table className="w-full min-w-[760px] text-left border-collapse text-xs font-semibold">
-            <thead>
-              <tr className="border-b border-slate-200 dark:border-slate-800 text-[10px] text-slate-400 uppercase tracking-wider">
-                <th className="py-3 px-3 whitespace-nowrap min-w-[130px]">Invoice Number</th>
-                <th className="py-3 px-3 whitespace-nowrap min-w-[160px]">Patient</th>
-                <th className="py-3 px-3 whitespace-nowrap min-w-[110px]">Subtotal</th>
-                <th className="py-3 px-3 whitespace-nowrap min-w-[120px]">Total Payable</th>
-                <th className="py-3 px-3 whitespace-nowrap min-w-[120px]">Paid Amount</th>
-                <th className="py-3 px-3 whitespace-nowrap min-w-[110px]">Status</th>
-                <th className="py-3 px-3 whitespace-nowrap text-center min-w-[150px]">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-900 text-slate-705">
-              {invoices.map((inv) => (
-                <tr key={inv.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/10 transition-colors">
-                  <td className="py-3.5 px-3 font-bold text-slate-900 dark:text-white whitespace-nowrap">
-                    <button onClick={() => setLastGeneratedReceipt(inv)} className="text-blue-600 hover:underline cursor-pointer">{inv.id}</button>
-                  </td>
-                  <td className="py-3.5 px-3 whitespace-nowrap">{inv.patientName}</td>
-                  <td className="py-3.5 px-3 whitespace-nowrap">₹{inv.subtotal.toLocaleString()}</td>
-                  <td className="py-3.5 px-3 font-black whitespace-nowrap">₹{inv.total.toLocaleString()}</td>
-                  <td className="py-3.5 px-3 text-emerald-600 font-extrabold whitespace-nowrap">₹{inv.paidAmount.toLocaleString()}</td>
-                  <td className="py-3.5 px-3 whitespace-nowrap">
-                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold inline-block ${
-                      inv.status === "Paid" ? "bg-emerald-50 text-emerald-700" :
-                      inv.status === "Partially Paid" ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"
-                    }`}>{inv.status}</span>
-                  </td>
-                  <td className="py-3.5 px-3 text-center whitespace-nowrap">
-                    <div className="flex items-center justify-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        title="View & Print Invoice"
-                        onClick={() => setLastGeneratedReceipt(inv)}
-                        className="h-9 w-9 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-955/40 dark:text-blue-400 dark:hover:bg-blue-900/60 flex items-center justify-center transition-colors cursor-pointer shrink-0"
-                      >
-                        <FileText className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        title="Download Invoice PDF"
-                        onClick={() => handleDownloadInvoicePDF(inv)}
-                        className="h-9 w-9 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 dark:hover:bg-emerald-900/60 flex items-center justify-center transition-colors cursor-pointer shrink-0"
-                      >
-                        <Download className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        title="Edit Invoice"
-                        onClick={() => handleEditInvoice(inv)}
-                        className="h-9 w-9 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center transition-colors cursor-pointer shrink-0"
-                      >
-                        <Pencil className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                      </button>
-                      {inv.status !== "Paid" && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">Hospital Invoices & Billing</h2>
+              <p className="text-xs text-slate-500">Manage billing statements, multiple treatment procedures, and payment receipts</p>
+            </div>
+            <Button
+              type="button"
+              onClick={() => {
+                if (patients.length > 0 && !invoiceFormPatientId) {
+                  setInvoiceFormPatientId(patients[0].id);
+                }
+                setInvoiceRows([{ id: `row-${Date.now()}`, treatment: "", quantity: 1, unitPrice: 0 }]);
+                setInvDiscount("0");
+                setInvDiscountType("percentage");
+                setInvPaid("0");
+                setIsCreateInvoiceModalOpen(true);
+              }}
+              className="h-9 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+            >
+              <Plus className="h-4 w-4" /> Create New Invoice
+            </Button>
+          </div>
+
+          <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs overflow-x-auto scrollbar-thin">
+            <table className="w-full min-w-[760px] text-left border-collapse text-xs font-semibold">
+              <thead>
+                <tr className="border-b border-slate-200 dark:border-slate-800 text-[10px] text-slate-400 uppercase tracking-wider">
+                  <th className="py-3 px-3 whitespace-nowrap min-w-[130px]">Invoice Number</th>
+                  <th className="py-3 px-3 whitespace-nowrap min-w-[160px]">Patient</th>
+                  <th className="py-3 px-3 whitespace-nowrap min-w-[110px]">Subtotal</th>
+                  <th className="py-3 px-3 whitespace-nowrap min-w-[120px]">Total Payable</th>
+                  <th className="py-3 px-3 whitespace-nowrap min-w-[120px]">Paid Amount</th>
+                  <th className="py-3 px-3 whitespace-nowrap min-w-[110px]">Status</th>
+                  <th className="py-3 px-3 whitespace-nowrap text-center min-w-[150px]">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-900 text-slate-705">
+                {invoices.map((inv) => (
+                  <tr key={inv.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/10 transition-colors">
+                    <td className="py-3.5 px-3 font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                      <button onClick={() => setLastGeneratedReceipt(inv)} className="text-blue-600 hover:underline cursor-pointer">{inv.id}</button>
+                    </td>
+                    <td className="py-3.5 px-3 whitespace-nowrap">{inv.patientName}</td>
+                    <td className="py-3.5 px-3 whitespace-nowrap">₹{inv.subtotal.toLocaleString()}</td>
+                    <td className="py-3.5 px-3 font-black whitespace-nowrap">₹{inv.total.toLocaleString()}</td>
+                    <td className="py-3.5 px-3 text-emerald-600 font-extrabold whitespace-nowrap">₹{inv.paidAmount.toLocaleString()}</td>
+                    <td className="py-3.5 px-3 whitespace-nowrap">
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold inline-block ${
+                        inv.status === "Paid" ? "bg-emerald-50 text-emerald-700" :
+                        inv.status === "Partially Paid" ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"
+                      }`}>{inv.status}</span>
+                    </td>
+                    <td className="py-3.5 px-3 text-center whitespace-nowrap">
+                      <div className="flex items-center justify-center gap-2 shrink-0">
                         <button
                           type="button"
-                          title="Collect Payment"
-                          onClick={() => {
-                            setSelectedInvoiceForPayment(inv);
-                            setPaymentCollectAmt(inv.total - inv.paidAmount);
-                            setPaymentMethod("Cash");
-                            setPayDiscountType(inv.discountType || "percentage");
-                            setPayDiscountValue(inv.discountValue || inv.discount);
-                            setPayDiscountPercent(inv.discount);
-                            setPayTaxPercent(inv.tax);
-                            setPayCustomItems([]);
-                          }}
-                          className="h-9 w-9 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shadow-xs transition-colors cursor-pointer shrink-0"
+                          title="View & Print Invoice"
+                          onClick={() => setLastGeneratedReceipt(inv)}
+                          className="h-9 w-9 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-955/40 dark:text-blue-400 dark:hover:bg-blue-900/60 flex items-center justify-center transition-colors cursor-pointer shrink-0"
                         >
-                          <CreditCard className="h-4 w-4" />
+                          <FileText className="h-4 w-4" />
                         </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                        <button
+                          type="button"
+                          title="Download Invoice PDF"
+                          onClick={() => handleDownloadInvoicePDF(inv)}
+                          className="h-9 w-9 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 dark:hover:bg-emerald-900/60 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                        >
+                          <Download className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          title="Edit Invoice"
+                          onClick={() => handleEditInvoice(inv)}
+                          className="h-9 w-9 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                        >
+                          <Pencil className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                        </button>
+                        {inv.status !== "Paid" && (
+                          <button
+                            type="button"
+                            title="Collect Payment"
+                            onClick={() => {
+                              setSelectedInvoiceForPayment(inv);
+                              setPaymentCollectAmt(inv.total - inv.paidAmount);
+                              setPaymentMethod("Cash");
+                              setPayDiscountType(inv.discountType || "percentage");
+                              setPayDiscountValue(inv.discountValue || inv.discount);
+                              setPayDiscountPercent(inv.discount);
+                              setPayTaxPercent(inv.tax);
+                              setPayCustomItems([]);
+                            }}
+                            className="h-9 w-9 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shadow-xs transition-colors cursor-pointer shrink-0"
+                          >
+                            <CreditCard className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -15144,6 +15443,19 @@ ${clinicName}`;
                   <span className="truncate">New Appointment</span>
                 </button>
                 <button
+                  onClick={() => {
+                    if (patients.length > 0) {
+                      setInvoiceFormPatientId(patients[0].id);
+                    }
+                    setIsCreateInvoiceModalOpen(true);
+                    setQuickAddOpen(false);
+                  }}
+                  className="w-full h-10 sm:h-11 flex items-center gap-2.5 px-3 rounded-lg text-slate-700 hover:bg-blue-50/50 hover:text-blue-750 dark:text-slate-300 dark:hover:bg-blue-955/20 dark:hover:text-blue-400 transition-all duration-150"
+                >
+                  <PlusCircle className="h-[18px] w-[18px] text-amber-500 shrink-0" />
+                  <span className="truncate">New Invoice</span>
+                </button>
+                <button
                   onClick={() => { selectTab("Billing"); setActiveSubTab("Invoices"); setQuickAddOpen(false); }}
                   className="w-full h-10 sm:h-11 flex items-center gap-2.5 px-3 rounded-lg text-slate-700 hover:bg-blue-50/50 hover:text-blue-750 dark:text-slate-300 dark:hover:bg-blue-955/20 dark:hover:text-blue-400 transition-all duration-150"
                 >
@@ -15545,6 +15857,252 @@ ${clinicName}`;
                 </form>
               )}
             </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Create Multi-Treatment Invoice Modal */}
+      {isCreateInvoiceModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-5 overflow-y-auto">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-3xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden text-xs my-auto"
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+              <div>
+                <span className="font-bold text-base text-slate-900 dark:text-white block">
+                  Create Hospital Invoice
+                </span>
+                <p className="text-[11px] text-slate-500">
+                  Select patient, add multiple treatments with custom quantities and prices, apply discounts, and record payments
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCreateInvoiceModalOpen(false)}
+                className="h-8 w-8 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={(e) => handleSaveInvoice(e, invoiceFormPatientId)} className="p-5 space-y-4 max-h-[80vh] overflow-y-auto scrollbar-thin">
+              {/* Patient Selector */}
+              <div>
+                <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Select Patient <span className="text-red-500">*</span>
+                </Label>
+                <select
+                  value={invoiceFormPatientId}
+                  onChange={e => setInvoiceFormPatientId(e.target.value)}
+                  className="w-full h-9 mt-1 px-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-semibold focus:outline-none"
+                  required
+                >
+                  <option value="">-- Choose Patient --</option>
+                  {patients.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.id} - {p.name} ({p.age} Yrs / {p.gender})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Treatments Table */}
+              <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-x-auto scrollbar-thin">
+                <table className="w-full min-w-[580px] text-left text-xs">
+                  <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-[10px] uppercase font-bold text-slate-500">
+                    <tr>
+                      <th className="py-2.5 px-2.5 w-10 text-center">#</th>
+                      <th className="py-2.5 px-3 min-w-[200px]">Treatment / Procedure</th>
+                      <th className="py-2.5 px-2 w-20 text-center">Qty</th>
+                      <th className="py-2.5 px-3 w-32 text-right">Unit Price (₹)</th>
+                      <th className="py-2.5 px-3 w-32 text-right">Line Total (₹)</th>
+                      <th className="py-2.5 px-2 w-12 text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-900">
+                    {invoiceRows.map((row, idx) => (
+                      <tr key={row.id}>
+                        <td className="py-2 px-2.5 text-center font-bold text-slate-500">{idx + 1}</td>
+                        <td className="py-2 px-3">
+                          <div className="space-y-1">
+                            <select
+                              value={row.treatment}
+                              onChange={e => handleUpdateTreatmentRow(row.id, "treatment", e.target.value)}
+                              className="w-full h-8 px-2 rounded border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-semibold focus:outline-none"
+                              required
+                            >
+                              <option value="">-- Choose Treatment --</option>
+                              {COMMON_TREATMENTS.map(t => (
+                                <option key={t} value={t}>{t}</option>
+                              ))}
+                              <option value="Other">Other (Custom Procedure)</option>
+                            </select>
+                            {row.treatment === "Other" && (
+                              <Input
+                                placeholder="Enter custom procedure name..."
+                                value={row.customName || ""}
+                                onChange={e => handleUpdateTreatmentRow(row.id, "customName", e.target.value)}
+                                className="h-8 text-xs font-semibold"
+                                required
+                              />
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2 px-2">
+                          <Input
+                            type="number"
+                            min="1"
+                            value={row.quantity}
+                            onChange={e => handleUpdateTreatmentRow(row.id, "quantity", Math.max(1, Number(e.target.value) || 1))}
+                            className="h-8 text-center text-xs font-semibold"
+                          />
+                        </td>
+                        <td className="py-2 px-3 text-right">
+                          <Input
+                            type="number"
+                            min="0"
+                            value={row.unitPrice}
+                            onChange={e => handleUpdateTreatmentRow(row.id, "unitPrice", Math.max(0, Number(e.target.value) || 0))}
+                            className="h-8 text-right text-xs font-semibold"
+                          />
+                        </td>
+                        <td className="py-2 px-3 text-right font-bold text-slate-900 dark:text-white">
+                          ₹{((Number(row.quantity) || 1) * (Number(row.unitPrice) || 0)).toLocaleString()}
+                        </td>
+                        <td className="py-2 px-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveTreatmentRow(row.id)}
+                            disabled={invoiceRows.length === 1}
+                            className={`p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-950/40 text-red-500 transition-colors ${invoiceRows.length === 1 ? "opacity-30 cursor-not-allowed" : "cursor-pointer"}`}
+                            title="Remove Treatment"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex justify-start">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleAddTreatmentRow}
+                  className="h-8 px-3 text-xs font-semibold border-dashed border-blue-400 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add Treatment
+                </Button>
+              </div>
+
+              {/* Financial Calculations & Payment */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Discount</Label>
+                      <div className="flex gap-1.5 mt-1">
+                        <Input
+                          type="number"
+                          min="0"
+                          value={invDiscount}
+                          onChange={e => setInvDiscount(e.target.value)}
+                          className="h-8 text-xs font-semibold"
+                        />
+                        <select
+                          value={invDiscountType}
+                          onChange={e => setInvDiscountType(e.target.value as any)}
+                          className="h-8 px-2 rounded border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-semibold"
+                        >
+                          <option value="percentage">%</option>
+                          <option value="fixed">₹</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Paid Amount (₹)</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={invPaid}
+                        onChange={e => setInvPaid(e.target.value)}
+                        className="h-8 mt-1 text-xs font-semibold"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Payment Mode</Label>
+                    <select
+                      value={invMode}
+                      onChange={e => setInvMode(e.target.value)}
+                      className="w-full h-8 mt-1 px-2.5 rounded border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-semibold"
+                    >
+                      <option value="UPI GPay">UPI / GPay</option>
+                      <option value="Cash">Cash</option>
+                      <option value="Card Swipe">Card</option>
+                      <option value="Bank Transfer">Net Banking</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Summary Box */}
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
+                  <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+                    <span>Subtotal:</span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">
+                      ₹{calculateInvoiceFormSubtotal().toLocaleString()}
+                    </span>
+                  </div>
+                  {Number(invDiscount) > 0 && (
+                    <div className="flex justify-between items-center text-red-600 dark:text-red-400">
+                      <span>Discount {invDiscountType === "percentage" ? `(${invDiscount}%)` : `(Fixed)`}:</span>
+                      <span className="font-semibold">
+                        -₹{calculateInvoiceFormDiscount(calculateInvoiceFormSubtotal()).toLocaleString()}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center text-sm font-bold text-slate-900 dark:text-white pt-2 border-t border-slate-200 dark:border-slate-800">
+                    <span>Total Payable:</span>
+                    <span className="text-base text-blue-600 dark:text-blue-400">
+                      ₹{calculateInvoiceFormTotal().toLocaleString()}
+                    </span>
+                  </div>
+                  {Number(invPaid) > 0 && (
+                    <div className="flex justify-between items-center text-[11px] pt-1">
+                      <span className="text-emerald-600 font-semibold">Paid: ₹{Number(invPaid).toLocaleString()}</span>
+                      <span className={Math.max(0, calculateInvoiceFormTotal() - Number(invPaid)) > 0 ? "text-amber-600 font-semibold" : "text-emerald-600 font-semibold"}>
+                        {Math.max(0, calculateInvoiceFormTotal() - Number(invPaid)) > 0
+                          ? `Balance: ₹${Math.max(0, calculateInvoiceFormTotal() - Number(invPaid)).toLocaleString()}`
+                          : "✓ Paid in Full"}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsCreateInvoiceModalOpen(false)}
+                  className="h-9 px-4 text-xs font-semibold"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  className="h-9 px-5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-lg shadow-sm cursor-pointer"
+                >
+                  Save & Generate Invoice
+                </Button>
+              </div>
+            </form>
           </motion.div>
         </div>
       )}
