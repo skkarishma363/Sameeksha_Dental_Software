@@ -142,10 +142,43 @@ export interface PatientPrescriptionRecord {
   created_at?: string;
 }
 
-interface FileAttachment {
+export interface FileAttachment {
+  id?: string;
   name: string;
   size: string;
   type: string;
+  category?: string;
+  mime_type?: string;
+  file_size?: number;
+  storage_path?: string;
+  url?: string;
+  created_at?: string;
+}
+
+function formatFileSize(bytes?: number | string): string {
+  const num = typeof bytes === "number" ? bytes : Number(bytes);
+  if (!num || isNaN(num) || num <= 0) return "0 KB";
+  if (num < 1024) return `${num} B`;
+  if (num < 1024 * 1024) return `${(num / 1024).toFixed(1)} KB`;
+  return `${(num / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function extractCategoryFromPath(storagePath?: string, fallback = "X-Ray Scan"): string {
+  if (!storagePath) return fallback;
+  const parts = storagePath.split("/");
+  if (parts.length >= 2) {
+    const slug = parts[1];
+    const map: Record<string, string> = {
+      "x-ray-scan": "X-Ray Scan",
+      "intraoral-photo": "Intraoral Photo",
+      "prescription-pdf": "Prescription PDF",
+      "clinical-report": "Clinical Report",
+      "billing-statement": "Billing Statement",
+    };
+    if (map[slug]) return map[slug];
+    return slug.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+  }
+  return fallback;
 }
 
 interface Patient {
@@ -1293,31 +1326,77 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         return fetchClinicData();
       }
 
-      const mappedPatients: Patient[] = dbPatients.map(p => ({
-        id: p.patient_id,
-        uuid: p.id,
-        name: p.name,
-        phone: p.phone,
-        age: p.age || 0,
-        gender: (p.gender === "Male" || p.gender === "Female") ? p.gender : "Male",
-        address: p.address || "",
-        visit: p.visit || "",
-        medicalNotes: p.medical_notes || "None",
-        balance: p.balance || "₹0",
-        status: (p.status === "Active" || p.status === "Inactive" || p.status === "Archived") ? p.status : "Active",
-        dentalChart: p.dental_chart || {},
-        prescriptions: p.prescriptions || [],
-        files: Array.isArray(p.files) ? p.files : [],
-        notes: p.notes || [],
-        email: p.email || undefined,
-        bloodGroup: p.blood_group || undefined,
-        patientType: p.patient_type || undefined,
-        occupation: p.occupation || undefined,
-        reference: p.reference || undefined,
-        medicalHistory: Array.isArray(p.medical_history) ? p.medical_history : [],
-        medicalHistoryOthers: p.medical_history_others || undefined,
-        createdAt: p.created_at || undefined
-      }));
+      // Fetch relational patient files from patient_files table
+      const { data: dbPatientFiles, error: pfFetchErr } = await supabase
+        .from("patient_files")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (pfFetchErr) {
+        console.warn("Could not load patient_files table:", pfFetchErr.message);
+      }
+
+      const mappedPatients: Patient[] = dbPatients.map(p => {
+        // Map files from public.patient_files
+        const relFiles: FileAttachment[] = (dbPatientFiles || [])
+          .filter((pf: any) => pf.patient_id === p.id || pf.patient_id === p.patient_id)
+          .map((pf: any) => ({
+            id: pf.id,
+            name: pf.name,
+            size: formatFileSize(pf.file_size),
+            type: extractCategoryFromPath(pf.storage_path, "X-Ray Scan"),
+            category: extractCategoryFromPath(pf.storage_path, "X-Ray Scan"),
+            mime_type: pf.mime_type || "application/octet-stream",
+            file_size: pf.file_size,
+            storage_path: pf.storage_path,
+            created_at: pf.created_at
+          }));
+
+        // Merge with existing p.files JSON array if legacy entries exist (avoiding duplicates)
+        const legacyFiles: FileAttachment[] = Array.isArray(p.files)
+          ? p.files
+              .filter((lf: any) => !relFiles.some(rf => rf.id === lf.id || rf.name === lf.name || (lf.storage_path && rf.storage_path === lf.storage_path)))
+              .map((lf: any) => ({
+                id: lf.id,
+                name: lf.name || "Attachment",
+                size: lf.size || "1.0 MB",
+                type: lf.type || lf.category || "X-Ray Scan",
+                category: lf.category || lf.type || "X-Ray Scan",
+                mime_type: lf.mime_type,
+                file_size: lf.file_size,
+                storage_path: lf.storage_path,
+                created_at: lf.created_at
+              }))
+          : [];
+
+        const combinedFiles = [...relFiles, ...legacyFiles];
+
+        return {
+          id: p.patient_id,
+          uuid: p.id,
+          name: p.name,
+          phone: p.phone,
+          age: p.age || 0,
+          gender: (p.gender === "Male" || p.gender === "Female") ? p.gender : "Male",
+          address: p.address || "",
+          visit: p.visit || "",
+          medicalNotes: p.medical_notes || "None",
+          balance: p.balance || "₹0",
+          status: (p.status === "Active" || p.status === "Inactive" || p.status === "Archived") ? p.status : "Active",
+          dentalChart: p.dental_chart || {},
+          prescriptions: p.prescriptions || [],
+          files: combinedFiles,
+          notes: p.notes || [],
+          email: p.email || undefined,
+          bloodGroup: p.blood_group || undefined,
+          patientType: p.patient_type || undefined,
+          occupation: p.occupation || undefined,
+          reference: p.reference || undefined,
+          medicalHistory: Array.isArray(p.medical_history) ? p.medical_history : [],
+          medicalHistoryOthers: p.medical_history_others || undefined,
+          createdAt: p.created_at || undefined
+        };
+      });
       setPatients(mappedPatients);
     }
 
@@ -3100,6 +3179,17 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
   const [newFileName, setNewFileName] = useState("");
   const [newFileType, setNewFileType] = useState("X-Ray Scan");
   const [newFileUploadedBy, setNewFileUploadedBy] = useState("");
+  const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
+  const [previewFileModal, setPreviewFileModal] = useState<{
+    isOpen: boolean;
+    file: FileAttachment | null;
+    signedUrl: string | null;
+    loading: boolean;
+  }>({ isOpen: false, file: null, signedUrl: null, loading: false });
+  const [fileToDelete, setFileToDelete] = useState<FileAttachment | null>(null);
+  const [isDeletingFile, setIsDeletingFile] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
 
 
@@ -4437,45 +4527,300 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     setLastGeneratedReceipt(confirmedInvoice);
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Check size limit (10MB)
+    const MAX_SIZE = 10 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
+      showToast(`File size (${formatFileSize(file.size)}) exceeds the 10 MB limit.`, "error");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    // Check accepted types: images and pdfs
+    const acceptedTypes = [
+      "image/png",
+      "image/jpeg",
+      "image/jpg",
+      "image/webp",
+      "application/pdf"
+    ];
+    const isAccepted = acceptedTypes.includes(file.type.toLowerCase()) ||
+      /\.(png|jpe?g|webp|pdf)$/i.test(file.name);
+
+    if (!isAccepted) {
+      showToast("Unsupported file format. Please upload PNG, JPG, or PDF clinical files.", "error");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    setSelectedUploadFile(file);
+    if (!newFileName.trim()) {
+      setNewFileName(file.name);
+    }
+  };
+
   const handleUploadFile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newFileName.trim()) {
-      showToast("File name is required.", "error");
+
+    if (!selectedUploadFile) {
+      showToast("Please choose a clinical file to upload from your computer.", "error");
       return;
     }
+
     const patientItem = patients.find(p => p.id === selectedPatientId);
-    if (!patientItem) return;
-
-    const newFile = {
-      name: newFileName.trim(),
-      size: "2.4 MB",
-      type: newFileType
-    };
-
-    const updatedFiles = [...(patientItem.files || []), newFile];
-
-    const { error: fileErr } = await supabase
-      .from("patients")
-      .update({ files: updatedFiles })
-      .eq("patient_id", selectedPatientId);
-
-    if (fileErr) {
-      showToast("Failed to save file attachment to database.", "error");
+    if (!patientItem) {
+      showToast("No active patient record selected.", "error");
       return;
     }
 
-    setPatients(prev => prev.map(p => {
-      if (p.id === selectedPatientId) {
-        return {
-          ...p,
-          files: updatedFiles
-        };
-      }
-      return p;
-    }));
+    // Patient primary key UUID
+    const patientUuid = patientItem.uuid || patientItem.id;
+    if (!patientUuid) {
+      showToast("Invalid patient identifier.", "error");
+      return;
+    }
 
-    setNewFileName("");
-    showToast("File uploaded and linked successfully.", "success");
+    // 10 MB size limit validation
+    const MAX_FILE_SIZE = 10 * 1024 * 1024;
+    if (selectedUploadFile.size > MAX_FILE_SIZE) {
+      showToast(`File size (${formatFileSize(selectedUploadFile.size)}) exceeds the 10 MB limit.`, "error");
+      return;
+    }
+
+    // Accepted types check
+    const acceptedMimes = ["image/png", "image/jpeg", "image/jpg", "image/webp", "application/pdf"];
+    const isMimeValid = acceptedMimes.includes(selectedUploadFile.type.toLowerCase()) ||
+      /\.(png|jpe?g|webp|pdf)$/i.test(selectedUploadFile.name);
+
+    if (!isMimeValid) {
+      showToast("Unsupported file format. Please upload PNG, JPG, or PDF files.", "error");
+      return;
+    }
+
+    setIsUploadingFile(true);
+
+    try {
+      // Get current auth session user ID if available
+      const { data: { session } } = await supabase.auth.getSession();
+      const uploaderId = session?.user?.id || null;
+
+      // Construct a clean, unique, organized storage path: <patientUuid>/<category-slug>/<timestamp>_<cleanFilename>
+      const cleanFileName = selectedUploadFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const categorySlug = newFileType.toLowerCase().replace(/[^a-z0-9]/g, "-");
+      const uniquePath = `${patientUuid}/${categorySlug}/${Date.now()}_${cleanFileName}`;
+
+      // Upload actual file bytes to private Supabase Storage bucket 'patient-files'
+      const { error: storageErr } = await supabase.storage
+        .from("patient-files")
+        .upload(uniquePath, selectedUploadFile, {
+          contentType: selectedUploadFile.type || "application/octet-stream",
+          upsert: false
+        });
+
+      if (storageErr) {
+        console.error("Storage upload error:", storageErr.message);
+        showToast("Storage upload failed: " + storageErr.message, "error");
+        setIsUploadingFile(false);
+        return;
+      }
+
+      // Final display name
+      const finalFileName = newFileName.trim() || selectedUploadFile.name;
+
+      // Insert metadata record into public.patient_files
+      const { data: insertedDbRecord, error: dbErr } = await supabase
+        .from("patient_files")
+        .insert({
+          patient_id: patientUuid,
+          name: finalFileName,
+          storage_path: uniquePath,
+          file_size: selectedUploadFile.size,
+          mime_type: selectedUploadFile.type || "application/octet-stream",
+          uploaded_by: uploaderId
+        })
+        .select()
+        .single();
+
+      if (dbErr) {
+        console.error("Database insert error:", dbErr.message);
+        // Rollback uploaded storage object to prevent orphan files
+        await supabase.storage.from("patient-files").remove([uniquePath]);
+        showToast("Failed to save file metadata: " + dbErr.message, "error");
+        setIsUploadingFile(false);
+        return;
+      }
+
+      // Create new FileAttachment object
+      const newFileAttachment: FileAttachment = {
+        id: insertedDbRecord.id,
+        name: finalFileName,
+        size: formatFileSize(selectedUploadFile.size),
+        type: newFileType,
+        category: newFileType,
+        mime_type: selectedUploadFile.type || "application/octet-stream",
+        file_size: selectedUploadFile.size,
+        storage_path: uniquePath,
+        created_at: insertedDbRecord.created_at
+      };
+
+      // Update mirror in patients.files JSONB
+      const updatedFiles = [newFileAttachment, ...(patientItem.files || [])];
+      await supabase
+        .from("patients")
+        .update({ files: updatedFiles })
+        .eq("id", patientUuid);
+
+      // Update local state
+      setPatients(prev => prev.map(p => {
+        if (p.id === selectedPatientId) {
+          return {
+            ...p,
+            files: updatedFiles
+          };
+        }
+        return p;
+      }));
+
+      // Reset form
+      setSelectedUploadFile(null);
+      setNewFileName("");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+
+      showToast(`File "${finalFileName}" uploaded successfully.`, "success");
+    } catch (err: any) {
+      console.error("File upload error:", err);
+      showToast("An unexpected error occurred while uploading: " + (err?.message || "Unknown"), "error");
+    } finally {
+      setIsUploadingFile(false);
+    }
+  };
+
+  const handleDownloadFile = async (file: FileAttachment) => {
+    if (!file.storage_path) {
+      showToast(`File "${file.name}" has no storage path recorded.`, "error");
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.storage
+        .from("patient-files")
+        .createSignedUrl(file.storage_path, 60);
+
+      if (error || !data?.signedUrl) {
+        showToast("Failed to generate download link: " + (error?.message || "Error"), "error");
+        return;
+      }
+
+      // Download file bytes with proper filename
+      const response = await fetch(data.signedUrl);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = file.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(blobUrl);
+
+      showToast(`Downloaded ${file.name}`, "success");
+    } catch (err: any) {
+      console.error("Download error:", err);
+      showToast("Download failed: " + (err?.message || "Network error"), "error");
+    }
+  };
+
+  const handlePreviewFile = async (file: FileAttachment) => {
+    if (!file.storage_path) {
+      showToast(`File "${file.name}" has no storage path recorded.`, "error");
+      return;
+    }
+
+    setPreviewFileModal({
+      isOpen: true,
+      file,
+      signedUrl: null,
+      loading: true
+    });
+
+    try {
+      const { data, error } = await supabase.storage
+        .from("patient-files")
+        .createSignedUrl(file.storage_path, 3600); // 1 hour validity
+
+      if (error || !data?.signedUrl) {
+        showToast("Failed to generate preview: " + (error?.message || "Error"), "error");
+        setPreviewFileModal({ isOpen: false, file: null, signedUrl: null, loading: false });
+        return;
+      }
+
+      setPreviewFileModal({
+        isOpen: true,
+        file,
+        signedUrl: data.signedUrl,
+        loading: false
+      });
+    } catch (err: any) {
+      console.error("Preview error:", err);
+      showToast("Preview failed: " + (err?.message || "Network error"), "error");
+      setPreviewFileModal({ isOpen: false, file: null, signedUrl: null, loading: false });
+    }
+  };
+
+  const handleConfirmDeleteFile = async () => {
+    if (!fileToDelete) return;
+    setIsDeletingFile(true);
+    try {
+      const patientItem = patients.find(p => p.id === selectedPatientId);
+      if (!patientItem) return;
+      const patientUuid = patientItem.uuid || patientItem.id;
+
+      // 1. Remove from Supabase Storage if storage_path exists
+      if (fileToDelete.storage_path) {
+        const { error: stErr } = await supabase.storage
+          .from("patient-files")
+          .remove([fileToDelete.storage_path]);
+        if (stErr) {
+          console.warn("Storage deletion warning:", stErr.message);
+        }
+      }
+
+      // 2. Remove from patient_files table if id exists
+      if (fileToDelete.id) {
+        const { error: dbErr } = await supabase
+          .from("patient_files")
+          .delete()
+          .eq("id", fileToDelete.id);
+        if (dbErr) {
+          console.error("Database deletion error:", dbErr.message);
+          showToast("Failed to delete file record from database: " + dbErr.message, "error");
+          setIsDeletingFile(false);
+          return;
+        }
+      }
+
+      // 3. Update patients.files JSONB mirror
+      const updatedFiles = (patientItem.files || []).filter(f =>
+        fileToDelete.id ? f.id !== fileToDelete.id : f.name !== fileToDelete.name
+      );
+      await supabase
+        .from("patients")
+        .update({ files: updatedFiles })
+        .eq("id", patientUuid);
+
+      // 4. Update local state
+      setPatients(prev => prev.map(p => p.id === selectedPatientId ? { ...p, files: updatedFiles } : p));
+      showToast(`File "${fileToDelete.name}" deleted successfully.`, "success");
+      setFileToDelete(null);
+    } catch (err: any) {
+      console.error("Delete error:", err);
+      showToast("Error deleting file: " + (err?.message || "Unknown error"), "error");
+    } finally {
+      setIsDeletingFile(false);
+    }
   };
 
   // --- MEDICINE INVENTORY ACTION HANDLERS ---
@@ -11136,76 +11481,264 @@ ${clinicName}`;
 
             {profileSubTab === "Files" && (
               <div className="space-y-6 animate-fadeIn">
-                {/* Mock Upload Form */}
+                {/* Upload Form */}
                 <form onSubmit={handleUploadFile} className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs space-y-4 text-xs">
-                  <span className="font-bold text-sm block border-b pb-2 mb-2">Attach Patient Scanning File</span>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 mb-2">
                     <div>
-                      <Label>File Name</Label>
-                      <Input value={newFileName} onChange={e => setNewFileName(e.target.value)} placeholder="e.g. panorex_xray_final.png" required />
+                      <span className="font-bold text-sm text-slate-900 dark:text-white block">Attach Patient Scanning File</span>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Upload scans, X-rays, intraoral photos, prescriptions, and clinical reports to secure cloud storage.
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-900">
+                      Max 10 MB • PNG, JPG, PDF, WEBP
+                    </span>
+                  </div>
+
+                  {/* Hidden real file input */}
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    accept=".png,.jpg,.jpeg,.webp,.pdf,image/png,image/jpeg,image/webp,application/pdf"
+                    className="hidden"
+                  />
+
+                  {/* File Selection Area */}
+                  {!selectedUploadFile ? (
+                    <div
+                      onClick={() => fileInputRef.current?.click()}
+                      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const file = e.dataTransfer.files?.[0];
+                        if (file) {
+                          const syntheticEvent = { target: { files: [file] } } as any;
+                          handleFileChange(syntheticEvent);
+                        }
+                      }}
+                      className="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-blue-500 dark:hover:border-blue-500 rounded-xl p-6 text-center transition-all cursor-pointer bg-slate-50/50 dark:bg-slate-900/30 hover:bg-blue-50/20 dark:hover:bg-blue-950/10 group"
+                    >
+                      <div className="mx-auto w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-950/80 flex items-center justify-center text-blue-600 dark:text-blue-400 group-hover:scale-105 transition-transform mb-3 shadow-xs">
+                        <Upload className="h-6 w-6" />
+                      </div>
+                      <p className="font-semibold text-slate-800 dark:text-slate-200 text-xs">
+                        Click to choose a file or drag & drop here
+                      </p>
+                      <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
+                        PNG, JPG, JPEG, WEBP or PDF (up to 10 MB)
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          fileInputRef.current?.click();
+                        }}
+                        className="mt-3.5 h-8 text-xs font-semibold px-4 border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      >
+                        Browse Computer
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="p-4 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/50 dark:bg-blue-950/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0">
+                          {selectedUploadFile.type.includes("pdf") ? (
+                            <FileText className="h-5 w-5" />
+                          ) : (
+                            <ImageIcon className="h-5 w-5" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-bold text-slate-900 dark:text-white truncate text-xs" title={selectedUploadFile.name}>
+                            {selectedUploadFile.name}
+                          </p>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                            {formatFileSize(selectedUploadFile.size)} • {selectedUploadFile.type || "Clinical File"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="h-7 text-[11px] px-2.5 font-medium"
+                          disabled={isUploadingFile}
+                        >
+                          Change File
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedUploadFile(null);
+                            setNewFileName("");
+                            if (fileInputRef.current) fileInputRef.current.value = "";
+                          }}
+                          className="h-7 text-[11px] px-2.5 font-medium text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40"
+                          disabled={isUploadingFile}
+                        >
+                          <X className="h-3.5 w-3.5 mr-1" />
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Metadata Input Row */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+                    <div>
+                      <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300">File Name / Label</Label>
+                      <Input
+                        value={newFileName}
+                        onChange={e => setNewFileName(e.target.value)}
+                        placeholder="e.g. panorex_xray_final.png"
+                        disabled={isUploadingFile}
+                        className="mt-1 text-xs h-9"
+                      />
                     </div>
                     <div>
-                      <Label>File Type Category</Label>
+                      <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300">File Type Category</Label>
                       <select
-                        className="flex h-9 w-full rounded-md border border-slate-200 bg-transparent px-3 py-1 text-xs focus:outline-none dark:border-slate-800 dark:bg-slate-900"
+                        className="mt-1 flex h-9 w-full rounded-md border border-slate-200 bg-transparent px-3 py-1 text-xs focus:outline-none dark:border-slate-800 dark:bg-slate-900 text-slate-850 dark:text-slate-200"
                         value={newFileType}
                         onChange={e => setNewFileType(e.target.value)}
+                        disabled={isUploadingFile}
                       >
                         <option value="X-Ray Scan">X-Ray Scan</option>
                         <option value="Intraoral Photo">Intraoral Photo</option>
                         <option value="Prescription PDF">Prescription PDF</option>
-                        <option value="Clinical PDF">Clinical Report</option>
+                        <option value="Clinical Report">Clinical Report</option>
                         <option value="Billing Statement">Billing Statement</option>
+                        <option value="Lab Report">Lab Report</option>
+                        <option value="Other Document">Other Document</option>
                       </select>
                     </div>
                     <div className="flex items-end">
-                      <Button type="submit" className="h-9 w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded">
-                        Upload Scan
+                      <Button
+                        type="submit"
+                        disabled={!selectedUploadFile || isUploadingFile}
+                        className="h-9 w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded text-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-xs"
+                      >
+                        {isUploadingFile ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span>Uploading File...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="h-4 w-4" />
+                            <span>Upload Scan</span>
+                          </>
+                        )}
                       </Button>
                     </div>
                   </div>
                 </form>
 
                 {/* Uploaded Files Table list */}
-                <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs text-xs font-semibold space-y-3">
-                  <span className="font-bold text-sm block mb-2 border-b pb-2">Patient Files Uploads</span>
-                  {patientItem.files.length > 0 ? (
-                    patientItem.files.map((file, idx) => (
-                      <div key={idx} className="p-3 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-5 w-5 text-blue-500" />
-                          <div>
-                            <span className="font-bold block text-slate-850 dark:text-slate-100">{file.name}</span>
-                            <p className="text-[10px] text-slate-400">{file.size || "1.8 MB"} • {file.type || "PNG Scan File"}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <button onClick={() => showToast(`Downloading file: ${file.name}`, "success")} className="text-[10px] text-blue-650 hover:underline font-bold cursor-pointer">Download</button>
-                          <button
-                            onClick={async () => {
-                              const updatedFiles = patientItem.files.filter((_, i) => i !== idx);
-                              const { error: fileErr } = await supabase
-                                .from("patients")
-                                .update({ files: updatedFiles })
-                                .eq("patient_id", selectedPatientId);
+                <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5 mb-2">
+                    <span className="font-bold text-sm text-slate-900 dark:text-white">
+                      Patient Files Uploads ({patientItem.files?.length || 0})
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      Private & Encrypted Storage
+                    </span>
+                  </div>
 
-                              if (fileErr) {
-                                showToast("Failed to delete file from database.", "error");
-                                return;
-                              }
+                  {patientItem.files && patientItem.files.length > 0 ? (
+                    <div className="space-y-2.5">
+                      {patientItem.files.map((file, idx) => {
+                        const isPdf = (file.mime_type?.includes("pdf") || file.name?.toLowerCase().endsWith(".pdf") || file.type?.toLowerCase().includes("pdf"));
+                        const isImg = (file.mime_type?.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(file.name));
+                        const displayCategory = file.category || file.type || "Document";
+                        const uploadDateFormatted = file.created_at ? new Date(file.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Saved";
 
-                              setPatients(prev => prev.map(p => p.id === selectedPatientId ? { ...p, files: updatedFiles } : p));
-                              showToast("File deleted successfully.", "success");
-                            }}
-                            className="text-[10px] text-red-500 hover:underline font-bold cursor-pointer"
+                        return (
+                          <div
+                            key={file.id || file.storage_path || idx}
+                            className="p-3.5 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/40 dark:bg-slate-900/30 transition-colors"
                           >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    ))
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${
+                                isPdf ? "bg-red-100 text-red-600 dark:bg-red-950/60 dark:text-red-400" :
+                                isImg ? "bg-blue-100 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400" :
+                                "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                              }`}>
+                                {isPdf ? <FileText className="h-5 w-5" /> : isImg ? <ImageIcon className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
+                              </div>
+                              <div className="min-w-0">
+                                <span className="font-bold block text-slate-900 dark:text-slate-100 text-xs truncate max-w-[280px] sm:max-w-md" title={file.name}>
+                                  {file.name}
+                                </span>
+                                <div className="flex flex-wrap items-center gap-2 mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                                  <span className="inline-flex items-center px-2 py-0.2 rounded-full font-semibold text-[10px] bg-slate-200/70 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                                    {displayCategory}
+                                  </span>
+                                  <span>•</span>
+                                  <span>{file.size || (file.file_size ? formatFileSize(file.file_size) : "Standard")}</span>
+                                  <span>•</span>
+                                  <span>{uploadDateFormatted}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                              {/* Preview Action */}
+                              {(isImg || isPdf) && file.storage_path && (
+                                <button
+                                  type="button"
+                                  onClick={() => handlePreviewFile(file)}
+                                  className="h-8 px-2.5 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center gap-1.5 text-[11px] font-semibold cursor-pointer transition-colors"
+                                  title="Preview File"
+                                >
+                                  <Eye className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                                  <span>Preview</span>
+                                </button>
+                              )}
+
+                              {/* Download Action */}
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadFile(file)}
+                                className="h-8 px-2.5 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center gap-1.5 text-[11px] font-semibold cursor-pointer transition-colors"
+                                title="Download File"
+                              >
+                                <Download className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                                <span>Download</span>
+                              </button>
+
+                              {/* Delete Action */}
+                              <button
+                                type="button"
+                                onClick={() => setFileToDelete(file)}
+                                className="h-8 px-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-red-50 dark:hover:bg-red-950/40 text-red-500 hover:text-red-600 flex items-center justify-center cursor-pointer transition-colors"
+                                title="Delete File"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   ) : (
-                    <p className="text-slate-400 py-2 text-center">No attachments uploaded.</p>
+                    <div className="py-10 text-center space-y-2 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
+                      <div className="mx-auto w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400">
+                        <FileText className="h-5 w-5" />
+                      </div>
+                      <p className="text-slate-700 dark:text-slate-300 font-semibold text-xs">No files uploaded yet</p>
+                      <p className="text-slate-400 dark:text-slate-500 text-[11px] max-w-sm mx-auto">
+                        Select an X-ray scan, intraoral photo, or clinical PDF from your computer above to attach it to {patientItem.name}&apos;s profile.
+                      </p>
+                    </div>
                   )}
                 </div>
               </div>
@@ -18156,6 +18689,138 @@ ${clinicName}`;
               )}
             </div>
           </motion.div>
+        </div>
+      )}
+
+      {/* Patient File Preview Modal */}
+      {previewFileModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50 dark:bg-slate-950">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                  {previewFileModal.file?.mime_type?.includes("pdf") || previewFileModal.file?.name.toLowerCase().endsWith(".pdf") ? (
+                    <FileText className="h-4 w-4" />
+                  ) : (
+                    <ImageIcon className="h-4 w-4" />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <h3 className="font-bold text-slate-900 dark:text-white text-sm truncate" title={previewFileModal.file?.name}>
+                    {previewFileModal.file?.name}
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {previewFileModal.file?.category || previewFileModal.file?.type || "Clinical Document"} • {previewFileModal.file?.size || "Standard"}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {previewFileModal.file && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => previewFileModal.file && handleDownloadFile(previewFileModal.file)}
+                    className="h-8 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    <span>Download</span>
+                  </Button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPreviewFileModal({ isOpen: false, file: null, signedUrl: null, loading: false })}
+                  className="w-8 h-8 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 flex items-center justify-center text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-auto p-4 flex items-center justify-center min-h-[300px] bg-slate-100/50 dark:bg-slate-950/50">
+              {previewFileModal.loading ? (
+                <div className="flex flex-col items-center gap-2 py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+                  <p className="text-xs text-slate-500">Generating secure preview...</p>
+                </div>
+              ) : previewFileModal.signedUrl ? (
+                previewFileModal.file?.mime_type?.includes("pdf") || previewFileModal.file?.name.toLowerCase().endsWith(".pdf") ? (
+                  <iframe
+                    src={previewFileModal.signedUrl}
+                    className="w-full h-[72vh] rounded-lg border border-slate-200 dark:border-slate-800 shadow-sm bg-white"
+                    title={previewFileModal.file?.name || "Patient Document Preview"}
+                  />
+                ) : (
+                  <img
+                    src={previewFileModal.signedUrl}
+                    alt={previewFileModal.file?.name || "Patient Document"}
+                    className="max-h-[72vh] max-w-full object-contain rounded-lg shadow-md"
+                  />
+                )
+              ) : (
+                <div className="text-center py-10 space-y-2">
+                  <AlertTriangle className="h-8 w-8 text-amber-500 mx-auto" />
+                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">Preview not available</p>
+                  <p className="text-[11px] text-slate-500">Please download the file to view it on your device.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Patient File Delete Confirmation Dialog */}
+      {fileToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-950/80 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
+                <Trash2 className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-900 dark:text-white text-sm">Delete Patient Document?</h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">This action cannot be undone.</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              Are you sure you want to permanently delete <span className="font-bold text-slate-900 dark:text-white">{fileToDelete.name}</span>? The file will be removed from secure cloud storage and the patient&apos;s history.
+            </p>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isDeletingFile}
+                onClick={() => setFileToDelete(null)}
+                className="text-xs font-medium cursor-pointer"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={isDeletingFile}
+                onClick={handleConfirmDeleteFile}
+                className="bg-red-600 hover:bg-red-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                {isDeletingFile ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>Delete File</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>
