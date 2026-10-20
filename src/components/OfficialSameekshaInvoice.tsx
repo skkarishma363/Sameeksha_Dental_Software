@@ -143,10 +143,10 @@ export function computeInvoiceLayout(
   balanceDue: number,
   startY = 575
 ): InvoiceLayoutResult {
-  // Comfortable vertical spacing based on line count
-  let lineHeight = 44;
-  if (items.length > 8) lineHeight = 34;
-  else if (items.length > 5) lineHeight = 38;
+  // Comfortable vertical spacing based on line count for 24px font
+  let lineHeight = 48;
+  if (items.length > 8) lineHeight = 38;
+  else if (items.length > 5) lineHeight = 42;
 
   let currentY = startY;
   let mainIndex = 1;
@@ -178,7 +178,7 @@ export function computeInvoiceLayout(
       cleanDesc = `${cleanDesc} (${qty})`;
     }
 
-    const maxChars = isSub ? 46 : 52;
+    const maxChars = isSub ? 40 : 46;
     const lines = wrapInvoiceText(cleanDesc, maxChars);
 
     // If an item has 0 amount and is immediately followed by a sub-item, treat as section header
@@ -195,10 +195,10 @@ export function computeInvoiceLayout(
       y: currentY,
     });
 
-    currentY += lines.length * lineHeight;
+    currentY += lines.length > 1 ? lineHeight + (lines.length - 1) * 29 : lineHeight;
   }
 
-  const dividerY = currentY + 16;
+  const dividerY = currentY + 18;
   const hasDiscount = discountAmt > 0;
   const hasPayment = paidAmount > 0;
 
@@ -401,31 +401,31 @@ export const OfficialSameekshaInvoice: React.FC<OfficialSameekshaInvoiceProps> =
             .inv-row-num {
               font-family: 'Segoe UI', Arial, -apple-system, BlinkMacSystemFont, sans-serif;
               font-weight: 700;
-              font-size: 20px;
+              font-size: 24px;
               fill: #111827;
             }
             .inv-row-desc {
               font-family: 'Segoe UI', Arial, -apple-system, BlinkMacSystemFont, sans-serif;
               font-weight: 600;
-              font-size: 20px;
+              font-size: 24px;
               fill: #111827;
             }
             .inv-row-amt {
               font-family: 'Segoe UI', Arial, -apple-system, BlinkMacSystemFont, sans-serif;
               font-weight: 600;
-              font-size: 20px;
+              font-size: 24px;
               fill: #111827;
             }
             .inv-total-text {
               font-family: 'Segoe UI', Arial, -apple-system, BlinkMacSystemFont, sans-serif;
               font-weight: 800;
-              font-size: 24px;
+              font-size: 28px;
               fill: #000000;
             }
             .inv-sub-text {
               font-family: 'Segoe UI', Arial, -apple-system, BlinkMacSystemFont, sans-serif;
               font-weight: 600;
-              font-size: 17px;
+              font-size: 19px;
               fill: #374151;
             }
           `}</style>
@@ -513,7 +513,7 @@ export const OfficialSameekshaInvoice: React.FC<OfficialSameekshaInvoiceProps> =
               <text
                 key={lIdx}
                 x={row.isSubItem ? "155" : "115"}
-                y={row.y + lIdx * 25}
+                y={row.y + lIdx * 29}
                 className="inv-row-desc"
               >
                 {line}

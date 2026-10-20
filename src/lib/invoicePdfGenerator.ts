@@ -227,19 +227,19 @@ export async function downloadSameekshaInvoicePDF(
           // Prefix/Number
           ctx.textAlign = "left";
           ctx.fillStyle = "#111827";
-          ctx.font = "bold 20px 'Segoe UI', Arial, -apple-system, sans-serif";
+          ctx.font = "bold 24px 'Segoe UI', Arial, -apple-system, sans-serif";
           ctx.fillText(row.prefix, row.isSubItem ? 125 : 75, row.y);
 
           // Description lines
-          ctx.font = "600 20px 'Segoe UI', Arial, -apple-system, sans-serif";
+          ctx.font = "600 24px 'Segoe UI', Arial, -apple-system, sans-serif";
           row.descriptionLines.forEach((line, lIdx) => {
-            ctx.fillText(line, row.isSubItem ? 155 : 115, row.y + lIdx * 25);
+            ctx.fillText(line, row.isSubItem ? 155 : 115, row.y + lIdx * 29);
           });
 
           // Amount right-aligned
           if (row.amountStr) {
             ctx.textAlign = "right";
-            ctx.font = "600 20px 'Segoe UI', Arial, -apple-system, sans-serif";
+            ctx.font = "600 24px 'Segoe UI', Arial, -apple-system, sans-serif";
             ctx.fillText(row.amountStr, 985, row.y);
           }
         });
@@ -256,7 +256,7 @@ export async function downloadSameekshaInvoicePDF(
         ctx.textAlign = "right";
 
         if (layout.hasDiscount) {
-          ctx.font = "600 17px 'Segoe UI', Arial, -apple-system, sans-serif";
+          ctx.font = "600 19px 'Segoe UI', Arial, -apple-system, sans-serif";
           ctx.fillStyle = "#374151";
           ctx.fillText(`Subtotal :  ${formatInvoiceCurrency(subtotal)}`, 985, layout.subtotalY);
 
@@ -266,13 +266,13 @@ export async function downloadSameekshaInvoicePDF(
         }
 
         // Prominent Total Line
-        ctx.font = "bold 24px 'Segoe UI', Arial, -apple-system, sans-serif";
+        ctx.font = "bold 28px 'Segoe UI', Arial, -apple-system, sans-serif";
         ctx.fillStyle = "#000000";
         ctx.fillText(`Total :  ${formatInvoiceCurrency(total)}`, 985, layout.totalY);
 
         // Payment Breakdown (only if payments were logged)
         if (layout.hasPayment) {
-          ctx.font = "600 17px 'Segoe UI', Arial, -apple-system, sans-serif";
+          ctx.font = "600 19px 'Segoe UI', Arial, -apple-system, sans-serif";
           ctx.fillStyle = "#059669";
           ctx.fillText(`Amount Paid :  ${formatInvoiceCurrency(paidAmount)}`, 985, layout.paidY);
 
