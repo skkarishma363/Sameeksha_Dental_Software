@@ -72,7 +72,10 @@ import {
   Boxes,
   AlertTriangle,
   ExternalLink,
-  Eye
+  Eye,
+  FileSpreadsheet,
+  Layers,
+  ArrowRightLeft
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -121,11 +124,43 @@ export interface MedicineItem {
   updated_at?: string;
 }
 
+export type StockTransactionType =
+  | "opening_stock"
+  | "received"
+  | "dispensed"
+  | "adjustment"
+  | "issued_to_staff"
+  | "sold"
+  | "used_in_treatment"
+  | "returned_from_staff"
+  | "damaged_expired";
+
+export interface StockTransactionMeta {
+  staff_id?: string;
+  staff_name?: string;
+  action_type?: string;
+  supplier_name?: string;
+  batch_number?: string;
+  expiry_date?: string;
+  unit_price?: number;
+  total_amount?: number;
+  patient_name?: string;
+  patient_id?: string;
+  invoice_ref?: string;
+  payment_status?: string;
+  usage_type?: "sold" | "used_in_treatment" | "other_dispensing";
+  actual_closing_stock?: number;
+  reason?: string;
+  custom_notes?: string;
+  recorded_by?: string;
+  timestamp?: string;
+}
+
 export interface StockTransaction {
   id: string;
   medicine_id: string;
   medicine_name?: string;
-  transaction_type: "opening_stock" | "received" | "dispensed" | "adjustment";
+  transaction_type: StockTransactionType;
   quantity: number;
   previous_quantity: number | null;
   new_quantity: number;
@@ -135,6 +170,68 @@ export interface StockTransaction {
   prescription_id?: string;
   created_by?: string;
   created_at?: string;
+}
+
+export function parseStockTxMeta(notesStr?: string | null): StockTransactionMeta {
+  if (!notesStr) return {};
+  try {
+    const trimmed = notesStr.trim();
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      return JSON.parse(trimmed);
+    }
+  } catch (_) {}
+  return { custom_notes: notesStr };
+}
+
+export function calculateStaffHeldStock(
+  staffId: string,
+  medicineId: string,
+  transactions: StockTransaction[],
+  upToTimestamp?: string
+): number {
+  let held = 0;
+  for (const tx of transactions) {
+    if (tx.medicine_id !== medicineId) continue;
+    const txTime = new Date(tx.created_at || tx.transaction_date).getTime();
+    if (upToTimestamp && txTime > new Date(upToTimestamp).getTime()) continue;
+
+    const meta = parseStockTxMeta(tx.notes);
+    if (meta.staff_id !== staffId) continue;
+
+    const qty = Math.abs(tx.quantity || 0);
+    if (tx.transaction_type === "issued_to_staff") {
+      held += qty;
+    } else if (tx.transaction_type === "sold") {
+      held -= qty;
+    } else if (tx.transaction_type === "used_in_treatment") {
+      held -= qty;
+    } else if (tx.transaction_type === "returned_from_staff") {
+      held -= qty;
+    } else if (tx.transaction_type === "damaged_expired") {
+      held -= qty;
+    } else if (tx.transaction_type === "adjustment" && meta.action_type === "staff_adjustment") {
+      held += tx.quantity;
+    }
+  }
+  return Math.max(0, held);
+}
+
+export interface DailyStaffReconciliationRow {
+  staffId: string;
+  staffName: string;
+  medicineId: string;
+  medicineName: string;
+  stockUnit: string;
+  openingStock: number;
+  stockIssued: number;
+  quantitySold: number;
+  quantityUsed: number;
+  quantityReturned: number;
+  damagedAdjusted: number;
+  expectedClosingStock: number;
+  actualClosingStock?: number;
+  variance: number;
+  salesAmount: number;
 }
 
 export interface StructuredPrescriptionItem {
@@ -1608,7 +1705,17 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         phone: p.phone || "+91 98765 00000",
         status: (p.status === "Active" || p.status === "Inactive" || p.status === "On Leave") ? p.status : "Active"
       }));
-      setStaffList(mappedStaff);
+      // If dbProfiles has only the owner, include operational clinic staff so staff stock distribution can be operated
+      const nonOwnerStaff = mappedStaff.filter(s => s.role !== "Owner / Dentist" && !s.role?.toLowerCase().includes("owner"));
+      if (nonOwnerStaff.length === 0) {
+        setStaffList([
+          ...mappedStaff,
+          { id: "st-1", name: "Sneha Rao", role: "Senior Nurse / Hygienist", phone: "+91 98765 11223", status: "Active" },
+          { id: "st-2", name: "Amit Kumar", role: "Desk Operations & Billing", phone: "+91 98765 44556", status: "Active" }
+        ]);
+      } else {
+        setStaffList(mappedStaff);
+      }
 
       const receptionistProfile = dbProfiles.find(p => p.role === "receptionist" || p.custom_title?.toLowerCase().includes("reception") || p.custom_title?.toLowerCase().includes("desk"));
       if (receptionistProfile?.full_name) {
@@ -1644,20 +1751,24 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         .order("created_at", { ascending: false });
 
       if (!txErr && dbTx) {
-        setStockTransactions(dbTx.map(t => ({
-          id: t.id,
-          medicine_id: t.medicine_id,
-          transaction_type: t.transaction_type,
-          quantity: Number(t.quantity),
-          previous_quantity: t.previous_quantity !== null ? Number(t.previous_quantity) : null,
-          new_quantity: Number(t.new_quantity),
-          transaction_date: t.transaction_date || t.created_at,
-          reference: t.reference,
-          notes: t.notes,
-          prescription_id: t.prescription_id,
-          created_by: t.created_by,
-          created_at: t.created_at
-        })));
+        setStockTransactions(dbTx.map(t => {
+          const med = dbMeds?.find(m => m.id === t.medicine_id);
+          return {
+            id: t.id,
+            medicine_id: t.medicine_id,
+            medicine_name: med?.name || "Medicine",
+            transaction_type: t.transaction_type as StockTransactionType,
+            quantity: Number(t.quantity),
+            previous_quantity: t.previous_quantity !== null ? Number(t.previous_quantity) : null,
+            new_quantity: Number(t.new_quantity),
+            transaction_date: t.transaction_date || t.created_at,
+            reference: t.reference,
+            notes: t.notes,
+            prescription_id: t.prescription_id,
+            created_by: t.created_by,
+            created_at: t.created_at
+          };
+        }));
       }
 
       const { data: dbPrescs, error: prescErr } = await supabase
@@ -2001,7 +2112,52 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
   const [addStockQty, setAddStockQty] = useState("");
   const [addStockDate, setAddStockDate] = useState(getTodayDbDate());
   const [addStockSupplier, setAddStockSupplier] = useState("");
+  const [addStockBatch, setAddStockBatch] = useState("");
+  const [addStockExpiry, setAddStockExpiry] = useState("");
   const [addStockNotes, setAddStockNotes] = useState("");
+  const [isSubmittingAddStock, setIsSubmittingAddStock] = useState(false);
+
+  // Issue Stock to Staff Modal State
+  const [issueStockModalOpen, setIssueStockModalOpen] = useState(false);
+  const [issueStaffId, setIssueStaffId] = useState("");
+  const [issueDate, setIssueDate] = useState(getTodayDbDate());
+  const [issueItems, setIssueItems] = useState<Array<{ medicineId: string; quantity: string }>>([
+    { medicineId: "", quantity: "" }
+  ]);
+  const [issueNotes, setIssueNotes] = useState("");
+  const [isSubmittingIssue, setIsSubmittingIssue] = useState(false);
+
+  // Record Sale / Dispensing Modal State
+  const [recordSaleModalOpen, setRecordSaleModalOpen] = useState(false);
+  const [saleStaffId, setSaleStaffId] = useState("");
+  const [saleUsageType, setSaleUsageType] = useState<"sold" | "used_in_treatment" | "other_dispensing">("sold");
+  const [salePatientId, setSalePatientId] = useState("");
+  const [salePatientName, setSalePatientName] = useState("");
+  const [saleInvoiceRef, setSaleInvoiceRef] = useState("");
+  const [salePaymentStatus, setSalePaymentStatus] = useState<"Paid" | "Unpaid" | "Included in Procedure" | "N/A">("Paid");
+  const [saleDate, setSaleDate] = useState(getTodayDbDate());
+  const [saleItems, setSaleItems] = useState<Array<{ medicineId: string; quantity: string; unitPrice: string }>>([
+    { medicineId: "", quantity: "", unitPrice: "" }
+  ]);
+  const [saleNotes, setSaleNotes] = useState("");
+  const [isSubmittingSale, setIsSubmittingSale] = useState(false);
+
+  // Record Return / Stock Adjustment Modal State
+  const [recordReturnModalOpen, setRecordReturnModalOpen] = useState(false);
+  const [returnMode, setReturnMode] = useState<"returned_from_staff" | "damaged_expired" | "physical_count" | "central_adjustment">("returned_from_staff");
+  const [returnStaffId, setReturnStaffId] = useState("");
+  const [returnMedicineId, setReturnMedicineId] = useState("");
+  const [returnQuantity, setReturnQuantity] = useState("");
+  const [returnReason, setReturnReason] = useState("");
+  const [returnNotes, setReturnNotes] = useState("");
+  const [returnActualCount, setReturnActualCount] = useState("");
+  const [isSubmittingReturn, setIsSubmittingReturn] = useState(false);
+
+  // Reports -> Medicine Stock Daily Reconciliation Filters & View States
+  const [reconciliationDate, setReconciliationDate] = useState(getTodayDbDate());
+  const [reconciliationStaffFilter, setReconciliationStaffFilter] = useState("all");
+  const [reconciliationSearch, setReconciliationSearch] = useState("");
+  const [medicineReportSubView, setMedicineReportSubView] = useState<"reconciliation" | "staff_holdings" | "history" | "catalogue">("reconciliation");
 
   // Stock Adjustment Modal State
   const [adjustStockModalOpen, setAdjustStockModalOpen] = useState(false);
@@ -4919,22 +5075,29 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     setMedicineModalOpen(false);
   };
 
-  const handleOpenAddStock = (med: MedicineItem) => {
-    setSelectedStockMedicine(med);
+  const handleOpenAddStock = (med?: MedicineItem | null) => {
+    setSelectedStockMedicine(med || medicines[0] || null);
     setAddStockQty("");
     setAddStockDate(getTodayDbDate());
     setAddStockSupplier("");
+    setAddStockBatch("");
+    setAddStockExpiry("");
     setAddStockNotes("");
+    setIsSubmittingAddStock(false);
     setAddStockModalOpen(true);
   };
 
   const handleAddStockSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmittingAddStock) return;
     if (!isOwner) {
       showToast("Unauthorized: Only clinic owners can add medicine stock.", "error");
       return;
     }
-    if (!selectedStockMedicine) return;
+    if (!selectedStockMedicine) {
+      showToast("Please select a medicine.", "error");
+      return;
+    }
 
     const qtyNum = Number(addStockQty);
     if (isNaN(qtyNum) || qtyNum <= 0) {
@@ -4942,55 +5105,65 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       return;
     }
 
-    const currentQty = selectedStockMedicine.available_quantity !== null ? selectedStockMedicine.available_quantity : 0;
-    const newQty = currentQty + qtyNum;
+    setIsSubmittingAddStock(true);
+    try {
+      const currentQty = selectedStockMedicine.available_quantity !== null ? selectedStockMedicine.available_quantity : 0;
+      const newQty = currentQty + qtyNum;
 
-    const { data: rpcRes, error: rpcErr } = await supabase.rpc("add_medicine_stock", {
-      p_medicine_id: selectedStockMedicine.id,
-      p_quantity: qtyNum,
-      p_transaction_date: addStockDate ? new Date(addStockDate).toISOString() : new Date().toISOString(),
-      p_reference: addStockSupplier.trim() || null,
-      p_notes: addStockNotes.trim() || null
-    });
+      const meta: StockTransactionMeta = {
+        action_type: "received",
+        supplier_name: addStockSupplier.trim() || undefined,
+        batch_number: addStockBatch.trim() || undefined,
+        expiry_date: addStockExpiry.trim() || undefined,
+        custom_notes: addStockNotes.trim() || undefined,
+        recorded_by: currentUserName || "Clinic Doctor",
+        timestamp: new Date().toISOString()
+      };
+      const notesStr = JSON.stringify(meta);
 
-    if (rpcErr) {
+      // Update central medicine inventory
       await supabase
         .from("medicines")
-        .update({ available_quantity: newQty, is_configured: true })
+        .update({ available_quantity: newQty, is_configured: true, updated_at: new Date().toISOString() })
         .eq("id", selectedStockMedicine.id);
 
-      await supabase.from("stock_transactions").insert({
+      const { data: txData } = await supabase.from("stock_transactions").insert({
         medicine_id: selectedStockMedicine.id,
         transaction_type: "received",
         quantity: qtyNum,
         previous_quantity: currentQty,
         new_quantity: newQty,
-        transaction_date: addStockDate ? new Date(addStockDate).toISOString() : new Date().toISOString(),
-        reference: addStockSupplier.trim() || null,
-        notes: addStockNotes.trim() || null
-      });
+        notes: notesStr
+      }).select().maybeSingle();
+
+      setMedicines(prev => prev.map(m => m.id === selectedStockMedicine.id ? {
+        ...m,
+        available_quantity: newQty,
+        is_configured: true
+      } : m));
+
+      setStockTransactions(prev => [{
+        id: txData?.id || `tx-${Date.now()}`,
+        medicine_id: selectedStockMedicine.id,
+        medicine_name: selectedStockMedicine.name,
+        transaction_type: "received",
+        quantity: qtyNum,
+        previous_quantity: currentQty,
+        new_quantity: newQty,
+        transaction_date: addStockDate ? `${addStockDate}T12:00:00.000Z` : new Date().toISOString(),
+        reference: addStockSupplier.trim() || undefined,
+        notes: notesStr,
+        created_at: new Date().toISOString()
+      }, ...prev]);
+
+      showToast(`Added ${qtyNum} ${selectedStockMedicine.stock_unit} to "${selectedStockMedicine.name}" central stock.`, "success");
+      setAddStockModalOpen(false);
+    } catch (err: any) {
+      console.error("Receive stock error:", err);
+      showToast(err.message || "Failed to record incoming shipment.", "error");
+    } finally {
+      setIsSubmittingAddStock(false);
     }
-
-    setMedicines(prev => prev.map(m => m.id === selectedStockMedicine.id ? {
-      ...m,
-      available_quantity: newQty,
-      is_configured: true
-    } : m));
-
-    setStockTransactions(prev => [{
-      id: `tx-${Date.now()}`,
-      medicine_id: selectedStockMedicine.id,
-      transaction_type: "received",
-      quantity: qtyNum,
-      previous_quantity: currentQty,
-      new_quantity: newQty,
-      transaction_date: addStockDate || new Date().toISOString(),
-      reference: addStockSupplier.trim() || undefined,
-      notes: addStockNotes.trim() || undefined
-    }, ...prev]);
-
-    showToast(`Added ${qtyNum} ${selectedStockMedicine.stock_unit} to "${selectedStockMedicine.name}" stock.`, "success");
-    setAddStockModalOpen(false);
   };
 
   const handleOpenAdjustStock = (med: MedicineItem) => {
@@ -5163,8 +5336,641 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
   };
 
 
+  // --- STAFF MEDICINE DISTRIBUTION & DAILY RECONCILIATION HANDLERS ---
 
-  // --- HELPER DYNAMIC CALCULATIONS ---
+  const handleOpenIssueStock = (preselectedMedId?: string) => {
+    setIssueStaffId(staffList.find(s => s.role !== "Owner / Dentist" && !s.role?.toLowerCase().includes("owner"))?.id || staffList[0]?.id || "");
+    setIssueDate(getTodayDbDate());
+    setIssueItems([
+      { medicineId: preselectedMedId || (medicines[0]?.id || ""), quantity: "" }
+    ]);
+    setIssueNotes("");
+    setIsSubmittingIssue(false);
+    setIssueStockModalOpen(true);
+  };
+
+  const handleIssueStockSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSubmittingIssue) return;
+    if (!issueStaffId) {
+      showToast("Please select a staff member to issue stock to.", "error");
+      return;
+    }
+    const targetStaff = staffList.find(s => s.id === issueStaffId);
+    if (!targetStaff) {
+      showToast("Selected staff member not found.", "error");
+      return;
+    }
+
+    const validItems = issueItems.filter(it => it.medicineId && Number(it.quantity) > 0);
+    if (validItems.length === 0) {
+      showToast("Please select at least one medicine and enter quantity greater than zero.", "error");
+      return;
+    }
+
+    // Check central availability
+    for (const it of validItems) {
+      const med = medicines.find(m => m.id === it.medicineId);
+      if (!med) {
+        showToast("Selected medicine not found in catalogue.", "error");
+        return;
+      }
+      const reqQty = Number(it.quantity);
+      const avail = med.available_quantity !== null ? med.available_quantity : 0;
+      if (reqQty > avail) {
+        showToast(`Cannot issue ${reqQty} ${med.stock_unit} of "${med.name}". Central available stock is only ${avail} ${med.stock_unit}.`, "error");
+        return;
+      }
+    }
+
+    setIsSubmittingIssue(true);
+    try {
+      const newTxList: StockTransaction[] = [];
+      const medUpdates: Record<string, number> = {};
+
+      for (const it of validItems) {
+        const med = medicines.find(m => m.id === it.medicineId)!;
+        const reqQty = Number(it.quantity);
+        const currentAvail = medUpdates[med.id] !== undefined ? medUpdates[med.id] : (med.available_quantity || 0);
+        const newAvail = Math.max(0, currentAvail - reqQty);
+        medUpdates[med.id] = newAvail;
+
+        const meta: StockTransactionMeta = {
+          staff_id: targetStaff.id,
+          staff_name: targetStaff.name,
+          action_type: "issued_to_staff",
+          custom_notes: issueNotes.trim() || undefined,
+          recorded_by: currentUserName || "Clinic Doctor",
+          timestamp: new Date().toISOString()
+        };
+        const notesStr = JSON.stringify(meta);
+
+        await supabase
+          .from("medicines")
+          .update({ available_quantity: newAvail, updated_at: new Date().toISOString() })
+          .eq("id", med.id);
+
+        const { data: txData } = await supabase
+          .from("stock_transactions")
+          .insert({
+            medicine_id: med.id,
+            transaction_type: "issued_to_staff",
+            quantity: reqQty,
+            previous_quantity: currentAvail,
+            new_quantity: newAvail,
+            notes: notesStr
+          })
+          .select()
+          .maybeSingle();
+
+        newTxList.push({
+          id: txData?.id || `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          medicine_id: med.id,
+          medicine_name: med.name,
+          transaction_type: "issued_to_staff",
+          quantity: reqQty,
+          previous_quantity: currentAvail,
+          new_quantity: newAvail,
+          transaction_date: issueDate ? `${issueDate}T12:00:00.000Z` : new Date().toISOString(),
+          notes: notesStr,
+          created_at: new Date().toISOString()
+        });
+      }
+
+      setMedicines(prev => prev.map(m => medUpdates[m.id] !== undefined ? { ...m, available_quantity: medUpdates[m.id] } : m));
+      setStockTransactions(prev => [...newTxList, ...prev]);
+
+      showToast(`Successfully issued ${validItems.length} medicine item(s) to ${targetStaff.name}.`, "success");
+      setIssueStockModalOpen(false);
+    } catch (err: any) {
+      console.error("Issue stock error:", err);
+      showToast(err.message || "Failed to complete stock issue transaction.", "error");
+    } finally {
+      setIsSubmittingIssue(false);
+    }
+  };
+
+  const handleOpenRecordSale = (preselectedStaffId?: string, preselectedMedId?: string) => {
+    setSaleStaffId(preselectedStaffId || staffList.find(s => s.role !== "Owner / Dentist" && !s.role?.toLowerCase().includes("owner"))?.id || staffList[0]?.id || "");
+    setSaleUsageType("sold");
+    setSalePatientId("");
+    setSalePatientName("");
+    setSaleInvoiceRef("");
+    setSalePaymentStatus("Paid");
+    setSaleDate(getTodayDbDate());
+    setSaleItems([
+      { medicineId: preselectedMedId || (medicines[0]?.id || ""), quantity: "", unitPrice: "" }
+    ]);
+    setSaleNotes("");
+    setIsSubmittingSale(false);
+    setRecordSaleModalOpen(true);
+  };
+
+  const handleRecordSaleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSubmittingSale) return;
+    if (!saleStaffId) {
+      showToast("Please select the staff member dispensing or selling stock.", "error");
+      return;
+    }
+    const targetStaff = staffList.find(s => s.id === saleStaffId);
+    if (!targetStaff) {
+      showToast("Staff member not found.", "error");
+      return;
+    }
+
+    const validItems = saleItems.filter(it => it.medicineId && Number(it.quantity) > 0);
+    if (validItems.length === 0) {
+      showToast("Please select at least one medicine with valid quantity.", "error");
+      return;
+    }
+
+    // Validate that staff member holds enough stock for each medicine!
+    for (const it of validItems) {
+      const med = medicines.find(m => m.id === it.medicineId);
+      if (!med) continue;
+      const reqQty = Number(it.quantity);
+      const held = calculateStaffHeldStock(targetStaff.id, med.id, stockTransactions);
+      if (reqQty > held) {
+        showToast(`Staff member "${targetStaff.name}" only holds ${held} ${med.stock_unit} of "${med.name}". Cannot dispense ${reqQty} ${med.stock_unit}.`, "error");
+        return;
+      }
+    }
+
+    setIsSubmittingSale(true);
+    try {
+      const newTxList: StockTransaction[] = [];
+      const txType: StockTransactionType = saleUsageType === "sold" ? "sold" : "used_in_treatment";
+
+      for (const it of validItems) {
+        const med = medicines.find(m => m.id === it.medicineId)!;
+        const qty = Number(it.quantity);
+        const unitPriceNum = it.unitPrice ? Number(it.unitPrice) : 0;
+        const totalAmountNum = saleUsageType === "sold" ? qty * unitPriceNum : 0;
+
+        const meta: StockTransactionMeta = {
+          staff_id: targetStaff.id,
+          staff_name: targetStaff.name,
+          action_type: txType,
+          usage_type: saleUsageType,
+          unit_price: unitPriceNum,
+          total_amount: totalAmountNum,
+          patient_name: salePatientName.trim() || undefined,
+          patient_id: salePatientId || undefined,
+          invoice_ref: saleInvoiceRef.trim() || undefined,
+          payment_status: saleUsageType === "sold" ? salePaymentStatus : "N/A",
+          custom_notes: saleNotes.trim() || undefined,
+          recorded_by: currentUserName || "Clinic Staff",
+          timestamp: new Date().toISOString()
+        };
+        const notesStr = JSON.stringify(meta);
+
+        const { data: txData } = await supabase
+          .from("stock_transactions")
+          .insert({
+            medicine_id: med.id,
+            transaction_type: txType,
+            quantity: qty,
+            previous_quantity: med.available_quantity,
+            new_quantity: med.available_quantity !== null ? med.available_quantity : 0,
+            patient_id: salePatientId || null,
+            notes: notesStr
+          })
+          .select()
+          .maybeSingle();
+
+        newTxList.push({
+          id: txData?.id || `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          medicine_id: med.id,
+          medicine_name: med.name,
+          transaction_type: txType,
+          quantity: qty,
+          previous_quantity: med.available_quantity,
+          new_quantity: med.available_quantity !== null ? med.available_quantity : 0,
+          transaction_date: saleDate ? `${saleDate}T12:00:00.000Z` : new Date().toISOString(),
+          notes: notesStr,
+          created_at: new Date().toISOString()
+        });
+      }
+
+      setStockTransactions(prev => [...newTxList, ...prev]);
+
+      const label = saleUsageType === "sold" ? "Medicine sale recorded" : "Clinical treatment usage recorded";
+      showToast(`${label} successfully for ${targetStaff.name}.`, "success");
+      setRecordSaleModalOpen(false);
+    } catch (err: any) {
+      console.error("Sale recording error:", err);
+      showToast(err.message || "Failed to record transaction.", "error");
+    } finally {
+      setIsSubmittingSale(false);
+    }
+  };
+
+  const handleOpenRecordReturn = (
+    mode: "returned_from_staff" | "damaged_expired" | "physical_count" | "central_adjustment" = "returned_from_staff",
+    preselectedStaffId?: string,
+    preselectedMedId?: string
+  ) => {
+    setReturnMode(mode);
+    setReturnStaffId(preselectedStaffId || staffList.find(s => s.role !== "Owner / Dentist" && !s.role?.toLowerCase().includes("owner"))?.id || staffList[0]?.id || "");
+    setReturnMedicineId(preselectedMedId || medicines[0]?.id || "");
+    setReturnQuantity("");
+    setReturnReason("");
+    setReturnNotes("");
+    setReturnActualCount("");
+    setIsSubmittingReturn(false);
+    setRecordReturnModalOpen(true);
+  };
+
+  const handleRecordReturnSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSubmittingReturn) return;
+
+    if (returnMode === "returned_from_staff") {
+      if (!returnStaffId) {
+        showToast("Please select the staff member returning stock.", "error");
+        return;
+      }
+      if (!returnMedicineId) {
+        showToast("Please select the medicine being returned.", "error");
+        return;
+      }
+      const qty = Number(returnQuantity);
+      if (isNaN(qty) || qty <= 0) {
+        showToast("Return quantity must be greater than zero.", "error");
+        return;
+      }
+      const targetStaff = staffList.find(s => s.id === returnStaffId);
+      const med = medicines.find(m => m.id === returnMedicineId);
+      if (!targetStaff || !med) return;
+
+      const held = calculateStaffHeldStock(targetStaff.id, med.id, stockTransactions);
+      if (qty > held) {
+        showToast(`Cannot return ${qty} ${med.stock_unit}. Staff member "${targetStaff.name}" only holds ${held} ${med.stock_unit}.`, "error");
+        return;
+      }
+
+      setIsSubmittingReturn(true);
+      try {
+        const currentAvail = med.available_quantity !== null ? med.available_quantity : 0;
+        const newAvail = currentAvail + qty;
+
+        await supabase.from("medicines").update({ available_quantity: newAvail }).eq("id", med.id);
+
+        const meta: StockTransactionMeta = {
+          staff_id: targetStaff.id,
+          staff_name: targetStaff.name,
+          action_type: "returned_from_staff",
+          reason: returnReason.trim() || "Unused stock returned to central inventory",
+          custom_notes: returnNotes.trim() || undefined,
+          recorded_by: currentUserName || "Clinic Staff",
+          timestamp: new Date().toISOString()
+        };
+        const notesStr = JSON.stringify(meta);
+
+        const { data: txData } = await supabase.from("stock_transactions").insert({
+          medicine_id: med.id,
+          transaction_type: "returned_from_staff",
+          quantity: qty,
+          previous_quantity: currentAvail,
+          new_quantity: newAvail,
+          notes: notesStr
+        }).select().maybeSingle();
+
+        setMedicines(prev => prev.map(m => m.id === med.id ? { ...m, available_quantity: newAvail } : m));
+        setStockTransactions(prev => [{
+          id: txData?.id || `tx-${Date.now()}`,
+          medicine_id: med.id,
+          medicine_name: med.name,
+          transaction_type: "returned_from_staff",
+          quantity: qty,
+          previous_quantity: currentAvail,
+          new_quantity: newAvail,
+          transaction_date: new Date().toISOString(),
+          notes: notesStr,
+          created_at: new Date().toISOString()
+        }, ...prev]);
+
+        showToast(`Successfully returned ${qty} ${med.stock_unit} of "${med.name}" to central inventory.`, "success");
+        setRecordReturnModalOpen(false);
+      } catch (err: any) {
+        console.error("Return error:", err);
+        showToast(err.message || "Failed to record return.", "error");
+      } finally {
+        setIsSubmittingReturn(false);
+      }
+    } else if (returnMode === "damaged_expired") {
+      if (!returnMedicineId) {
+        showToast("Please select the medicine.", "error");
+        return;
+      }
+      const qty = Number(returnQuantity);
+      if (isNaN(qty) || qty <= 0) {
+        showToast("Quantity must be greater than zero.", "error");
+        return;
+      }
+      if (!returnReason.trim()) {
+        showToast("Please specify the damage or expiry reason.", "error");
+        return;
+      }
+      const med = medicines.find(m => m.id === returnMedicineId);
+      if (!med) return;
+
+      const targetStaff = returnStaffId ? staffList.find(s => s.id === returnStaffId) : null;
+      if (targetStaff) {
+        const held = calculateStaffHeldStock(targetStaff.id, med.id, stockTransactions);
+        if (qty > held) {
+          showToast(`Staff member "${targetStaff.name}" only holds ${held} ${med.stock_unit}.`, "error");
+          return;
+        }
+      } else {
+        const avail = med.available_quantity !== null ? med.available_quantity : 0;
+        if (qty > avail) {
+          showToast(`Central stock only has ${avail} ${med.stock_unit}.`, "error");
+          return;
+        }
+      }
+
+      setIsSubmittingReturn(true);
+      try {
+        const currentAvail = med.available_quantity !== null ? med.available_quantity : 0;
+        const newAvail = targetStaff ? currentAvail : Math.max(0, currentAvail - qty);
+
+        if (!targetStaff) {
+          await supabase.from("medicines").update({ available_quantity: newAvail }).eq("id", med.id);
+          setMedicines(prev => prev.map(m => m.id === med.id ? { ...m, available_quantity: newAvail } : m));
+        }
+
+        const meta: StockTransactionMeta = {
+          staff_id: targetStaff?.id,
+          staff_name: targetStaff?.name,
+          action_type: "damaged_expired",
+          reason: returnReason.trim(),
+          custom_notes: returnNotes.trim() || undefined,
+          recorded_by: currentUserName || "Clinic Staff",
+          timestamp: new Date().toISOString()
+        };
+        const notesStr = JSON.stringify(meta);
+
+        const { data: txData } = await supabase.from("stock_transactions").insert({
+          medicine_id: med.id,
+          transaction_type: "damaged_expired",
+          quantity: qty,
+          previous_quantity: currentAvail,
+          new_quantity: newAvail,
+          notes: notesStr
+        }).select().maybeSingle();
+
+        setStockTransactions(prev => [{
+          id: txData?.id || `tx-${Date.now()}`,
+          medicine_id: med.id,
+          medicine_name: med.name,
+          transaction_type: "damaged_expired",
+          quantity: qty,
+          previous_quantity: currentAvail,
+          new_quantity: newAvail,
+          transaction_date: new Date().toISOString(),
+          notes: notesStr,
+          created_at: new Date().toISOString()
+        }, ...prev]);
+
+        showToast(`Recorded ${qty} ${med.stock_unit} of "${med.name}" as damaged/expired write-off.`, "success");
+        setRecordReturnModalOpen(false);
+      } catch (err: any) {
+        console.error("Damaged stock error:", err);
+        showToast(err.message || "Failed to record damaged stock.", "error");
+      } finally {
+        setIsSubmittingReturn(false);
+      }
+    } else if (returnMode === "physical_count") {
+      if (!returnStaffId) {
+        showToast("Please select a staff member.", "error");
+        return;
+      }
+      if (!returnMedicineId) {
+        showToast("Please select a medicine.", "error");
+        return;
+      }
+      const countNum = Number(returnActualCount);
+      if (isNaN(countNum) || countNum < 0) {
+        showToast("Actual count cannot be negative.", "error");
+        return;
+      }
+      const targetStaff = staffList.find(s => s.id === returnStaffId);
+      const med = medicines.find(m => m.id === returnMedicineId);
+      if (!targetStaff || !med) return;
+
+      setIsSubmittingReturn(true);
+      try {
+        const meta: StockTransactionMeta = {
+          staff_id: targetStaff.id,
+          staff_name: targetStaff.name,
+          action_type: "physical_count_audit",
+          actual_closing_stock: countNum,
+          reason: returnReason.trim() || "Daily physical closing stock verification",
+          custom_notes: returnNotes.trim() || undefined,
+          recorded_by: currentUserName || "Clinic Staff",
+          timestamp: new Date().toISOString()
+        };
+        const notesStr = JSON.stringify(meta);
+
+        const { data: txData } = await supabase.from("stock_transactions").insert({
+          medicine_id: med.id,
+          transaction_type: "adjustment",
+          quantity: 0,
+          previous_quantity: med.available_quantity,
+          new_quantity: med.available_quantity !== null ? med.available_quantity : 0,
+          notes: notesStr
+        }).select().maybeSingle();
+
+        setStockTransactions(prev => [{
+          id: txData?.id || `tx-${Date.now()}`,
+          medicine_id: med.id,
+          medicine_name: med.name,
+          transaction_type: "adjustment",
+          quantity: 0,
+          previous_quantity: med.available_quantity,
+          new_quantity: med.available_quantity !== null ? med.available_quantity : 0,
+          transaction_date: new Date().toISOString(),
+          notes: notesStr,
+          created_at: new Date().toISOString()
+        }, ...prev]);
+
+        showToast(`Physical closing count of ${countNum} ${med.stock_unit} recorded for ${targetStaff.name}.`, "success");
+        setRecordReturnModalOpen(false);
+      } catch (err: any) {
+        console.error("Count record error:", err);
+        showToast(err.message || "Failed to record physical count.", "error");
+      } finally {
+        setIsSubmittingReturn(false);
+      }
+    }
+  };
+
+  // Helper computation for End-of-Day Daily Reconciliation Report
+  const getDailyStaffReconciliationData = (
+    targetDateStr: string,
+    filterStaffId: string,
+    searchQuery: string
+  ) => {
+    // Target Day bounds in IST
+    const startOfDay = new Date(`${targetDateStr}T00:00:00.000+05:30`).getTime();
+    const endOfDay = new Date(`${targetDateStr}T23:59:59.999+05:30`).getTime();
+
+    const targetStaffList = filterStaffId === "all" ? staffList : staffList.filter(s => s.id === filterStaffId);
+    const rows: DailyStaffReconciliationRow[] = [];
+
+    targetStaffList.forEach(staff => {
+      medicines.forEach(med => {
+        if (searchQuery && !med.name.toLowerCase().includes(searchQuery.toLowerCase())) {
+          return;
+        }
+
+        let openingStock = 0;
+        let stockIssued = 0;
+        let quantitySold = 0;
+        let quantityUsed = 0;
+        let quantityReturned = 0;
+        let damagedAdjusted = 0;
+        let salesAmount = 0;
+        let actualClosingStock: number | undefined = undefined;
+
+        stockTransactions.forEach(tx => {
+          if (tx.medicine_id !== med.id) return;
+          const meta = parseStockTxMeta(tx.notes);
+          if (meta.staff_id !== staff.id) return;
+
+          const txTime = new Date(tx.created_at || tx.transaction_date).getTime();
+          const qty = Math.abs(tx.quantity || 0);
+
+          if (txTime < startOfDay) {
+            // Prior to this day -> accumulates into opening stock
+            if (tx.transaction_type === "issued_to_staff") openingStock += qty;
+            else if (tx.transaction_type === "sold") openingStock -= qty;
+            else if (tx.transaction_type === "used_in_treatment") openingStock -= qty;
+            else if (tx.transaction_type === "returned_from_staff") openingStock -= qty;
+            else if (tx.transaction_type === "damaged_expired") openingStock -= qty;
+            else if (tx.transaction_type === "adjustment" && meta.action_type === "staff_adjustment") openingStock += tx.quantity;
+          } else if (txTime >= startOfDay && txTime <= endOfDay) {
+            // During this selected day
+            if (tx.transaction_type === "issued_to_staff") {
+              stockIssued += qty;
+            } else if (tx.transaction_type === "sold") {
+              quantitySold += qty;
+              salesAmount += (meta.total_amount || 0);
+            } else if (tx.transaction_type === "used_in_treatment") {
+              quantityUsed += qty;
+            } else if (tx.transaction_type === "returned_from_staff") {
+              quantityReturned += qty;
+            } else if (tx.transaction_type === "damaged_expired") {
+              damagedAdjusted += qty;
+            }
+
+            if (meta.actual_closing_stock !== undefined) {
+              actualClosingStock = meta.actual_closing_stock;
+            }
+          }
+        });
+
+        openingStock = Math.max(0, openingStock);
+        const expectedClosingStock = Math.max(0, openingStock + stockIssued - quantitySold - quantityUsed - quantityReturned - damagedAdjusted);
+        const variance = actualClosingStock !== undefined ? (actualClosingStock - expectedClosingStock) : 0;
+
+        // Include row if any transaction occurred or stock is held
+        if (
+          openingStock > 0 ||
+          stockIssued > 0 ||
+          quantitySold > 0 ||
+          quantityUsed > 0 ||
+          quantityReturned > 0 ||
+          damagedAdjusted > 0 ||
+          actualClosingStock !== undefined
+        ) {
+          rows.push({
+            staffId: staff.id,
+            staffName: staff.name,
+            medicineId: med.id,
+            medicineName: med.name,
+            stockUnit: med.stock_unit,
+            openingStock,
+            stockIssued,
+            quantitySold,
+            quantityUsed,
+            quantityReturned,
+            damagedAdjusted,
+            expectedClosingStock,
+            actualClosingStock,
+            variance,
+            salesAmount
+          });
+        }
+      });
+    });
+
+    const totalIssued = rows.reduce((s, r) => s + r.stockIssued, 0);
+    const totalSold = rows.reduce((s, r) => s + r.quantitySold, 0);
+    const totalUsed = rows.reduce((s, r) => s + r.quantityUsed, 0);
+    const totalReturned = rows.reduce((s, r) => s + r.quantityReturned, 0);
+    const totalSalesAmount = rows.reduce((s, r) => s + r.salesAmount, 0);
+    const totalExpectedClosing = rows.reduce((s, r) => s + r.expectedClosingStock, 0);
+    const discrepanciesCount = rows.filter(r => r.actualClosingStock !== undefined && r.variance !== 0).length;
+
+    return {
+      rows,
+      summary: {
+        totalIssued,
+        totalSold,
+        totalUsed,
+        totalReturned,
+        totalSalesAmount,
+        totalExpectedClosing,
+        discrepanciesCount
+      }
+    };
+  };
+
+  const handleExportReconciliationCSV = () => {
+    const recon = getDailyStaffReconciliationData(reconciliationDate, reconciliationStaffFilter, reconciliationSearch);
+    const headers = [
+      "Staff Member",
+      "Medicine",
+      "Stock Unit",
+      "Opening Staff Stock",
+      "Stock Issued",
+      "Quantity Sold",
+      "Quantity Used",
+      "Quantity Returned",
+      "Damaged / Adjusted",
+      "Expected Closing Stock",
+      "Actual Closing Stock",
+      "Variance",
+      "Sales Amount (INR)"
+    ];
+    const csvRows = recon.rows.map(r => [
+      `"${(r.staffName || '').replace(/"/g, '""')}"`,
+      `"${(r.medicineName || '').replace(/"/g, '""')}"`,
+      `"${(r.stockUnit || '').replace(/"/g, '""')}"`,
+      r.openingStock,
+      r.stockIssued,
+      r.quantitySold,
+      r.quantityUsed,
+      r.quantityReturned,
+      r.damagedAdjusted,
+      r.expectedClosingStock,
+      r.actualClosingStock !== undefined ? r.actualClosingStock : "Not Counted",
+      r.variance,
+      r.salesAmount
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...csvRows.map(e => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Medicine_Reconciliation_${reconciliationDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast("Reconciliation report exported as CSV.", "success");
+  };
 
   const totalRevenue = invoices.reduce((sum, inv) => sum + inv.paidAmount, 0);
 
@@ -14035,175 +14841,817 @@ ${clinicName}`;
           </div>
         )}
 
-        {/* SUB-TAB 5: MEDICINE STOCK */}
-        {currentSubTab === "Medicine Stock" && (
-          <div className="space-y-6 animate-fadeIn">
-            {/* 1. TIMEFRAME FILTER & METRIC HEADER */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 sm:p-4 shadow-xs">
-              <div className="flex items-center gap-2">
-                <Boxes className="h-5 w-5 text-blue-600" />
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Medicine Stock Analytics & Audit Logs</h3>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Inventory levels, dispensing history, and stock movement logs</p>
+        {/* SUB-TAB 5: MEDICINE STOCK DAILY RECONCILIATION & STAFF DISTRIBUTION */}
+        {currentSubTab === "Medicine Stock" && (() => {
+          const recon = getDailyStaffReconciliationData(
+            reconciliationDate,
+            reconciliationStaffFilter,
+            reconciliationSearch
+          );
+
+          return (
+            <div className="space-y-6 animate-fadeIn">
+              {/* 1. TOP HEADER & WORKFLOW ACTION CONTROLS */}
+              <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-4 bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                    <Boxes className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      Daily Medicine Stock Reconciliation & Ledger
+                      <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                        Live System
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      Track supplier receipts, staff-issued stock, clinical dispensing, sales revenue, and physical closing counts.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Quick Action Buttons */}
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <Button
+                    type="button"
+                    onClick={() => handleOpenIssueStock()}
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold h-9 px-3.5 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    title="Issue medicines to staff member"
+                  >
+                    <Package className="h-3.5 w-3.5" /> Issue to Staff
+                  </Button>
+
+                  <Button
+                    type="button"
+                    onClick={() => handleOpenRecordSale()}
+                    className="bg-purple-600 hover:bg-purple-500 text-white font-bold h-9 px-3.5 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    title="Record medicine sale or clinical dispensing"
+                  >
+                    <Pill className="h-3.5 w-3.5" /> Record Sale / Dispense
+                  </Button>
+
+                  <Button
+                    type="button"
+                    onClick={() => handleOpenRecordReturn("returned_from_staff")}
+                    className="bg-amber-600 hover:bg-amber-500 text-white font-bold h-9 px-3.5 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    title="Record unused stock returns or damaged adjustments"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" /> Return / Adjust
+                  </Button>
+
+                  {isOwner && (
+                    <Button
+                      type="button"
+                      onClick={() => handleOpenAddStock()}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-9 px-3.5 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      title="Receive incoming supplier stock"
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Receive Stock
+                    </Button>
+                  )}
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => window.print()}
+                    className="h-9 px-3 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer"
+                    title="Print End-of-Day Report"
+                  >
+                    <Printer className="h-3.5 w-3.5" /> Print
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleExportReconciliationCSV}
+                    className="h-9 px-3 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer"
+                    title="Export report as CSV"
+                  >
+                    <Download className="h-3.5 w-3.5" /> Export CSV
+                  </Button>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl self-start sm:self-auto overflow-x-auto">
-                {(["Today", "Week", "Month", "Custom"] as const).map((filter) => (
-                  <button
-                    key={filter}
-                    type="button"
-                    onClick={() => {
-                      if (filter === "Custom") {
-                        setCustomRangeModalOpen(true);
-                      } else {
-                        setReportsFilter(filter);
-                      }
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-                      reportsFilter === filter
-                        ? "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs"
-                        : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200"
-                    }`}
-                  >
-                    {filter === "Custom" && appliedCustomLabel ? appliedCustomLabel : filter === "Week" ? "This Week" : filter === "Month" ? "This Month" : filter}
-                  </button>
-                ))}
+              {/* 2. SUB-VIEW TABS & AUDIT FILTERS BAR */}
+              <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 sm:p-4 shadow-xs">
+                {/* View Mode Switcher */}
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl text-xs font-semibold overflow-x-auto scrollbar-none shrink-0">
+                  {[
+                    { id: "reconciliation", label: "Daily Reconciliation", icon: FileSpreadsheet },
+                    { id: "staff_holdings", label: "Staff Stock Holdings", icon: Users },
+                    { id: "history", label: "Movement History", icon: Clock },
+                    { id: "catalogue", label: "Central Catalogue", icon: Boxes },
+                  ].map((tab) => {
+                    const TabIcon = tab.icon;
+                    const isActive = medicineReportSubView === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setMedicineReportSubView(tab.id as any)}
+                        className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer ${
+                          isActive
+                            ? "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs font-bold"
+                            : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                        }`}
+                      >
+                        <TabIcon className="h-3.5 w-3.5" />
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Filter Controls */}
+                <div className="flex flex-wrap items-center gap-2.5">
+                  {/* Date Selector */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Date:</span>
+                    <Input
+                      type="date"
+                      value={reconciliationDate}
+                      onChange={(e) => setReconciliationDate(e.target.value)}
+                      className="h-8 text-xs rounded-xl w-36 px-2.5"
+                    />
+                    {reconciliationDate !== getTodayDbDate() && (
+                      <button
+                        type="button"
+                        onClick={() => setReconciliationDate(getTodayDbDate())}
+                        className="text-[11px] font-bold text-blue-600 hover:underline cursor-pointer px-1"
+                      >
+                        Today
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Staff Filter */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Staff:</span>
+                    <select
+                      value={reconciliationStaffFilter}
+                      onChange={(e) => setReconciliationStaffFilter(e.target.value)}
+                      className="h-8 text-xs rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-2.5 text-slate-800 dark:text-slate-200 font-semibold cursor-pointer outline-none focus:ring-1 focus:ring-blue-500"
+                    >
+                      <option value="all">All Staff Members ({staffList.length})</option>
+                      {staffList.map((st) => (
+                        <option key={st.id} value={st.id}>
+                          {st.name} ({st.role || "Staff"})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Medicine Search */}
+                  <div className="relative w-44 sm:w-52">
+                    <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-400" />
+                    <Input
+                      placeholder="Filter medicine..."
+                      value={reconciliationSearch}
+                      onChange={(e) => setReconciliationSearch(e.target.value)}
+                      className="pl-8 h-8 text-xs rounded-xl"
+                    />
+                  </div>
+                </div>
               </div>
-            </div>
 
-            {/* 2. METRIC SUMMARY CARDS */}
-            {(() => {
-              const medAnalytics = medStats;
-              return (
-                <>
-                  <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5 sm:gap-4">
-                    <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col justify-between">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Total Tracked</span>
-                        <div className="h-8 w-8 rounded-xl bg-blue-50 dark:bg-blue-950/50 flex items-center justify-center text-blue-600">
-                          <Pill className="h-4 w-4" />
-                        </div>
-                      </div>
-                      <div className="mt-3">
-                        <span className="text-2xl font-bold text-slate-900 dark:text-white">{medAnalytics.totalTracked}</span>
-                        <p className="text-[10px] text-slate-400 mt-0.5">Catalogue Medicines</p>
-                      </div>
+              {/* 3. SEVEN METRIC SUMMARY CARDS (Live database-backed totals) */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                {/* 1. Issued */}
+                <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Issued</span>
+                    <div className="h-6 w-6 rounded-lg bg-blue-50 dark:bg-blue-950/50 flex items-center justify-center text-blue-600">
+                      <Package className="h-3.5 w-3.5" />
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <span className="text-xl font-bold text-blue-600 dark:text-blue-400">
+                      +{recon.summary.totalIssued}
+                    </span>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Units to Staff</p>
+                  </div>
+                </div>
+
+                {/* 2. Sold */}
+                <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Sold</span>
+                    <div className="h-6 w-6 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 flex items-center justify-center text-emerald-600">
+                      <Receipt className="h-3.5 w-3.5" />
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
+                      {recon.summary.totalSold}
+                    </span>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Units to Patients</p>
+                  </div>
+                </div>
+
+                {/* 3. Used in Treatment */}
+                <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Used</span>
+                    <div className="h-6 w-6 rounded-lg bg-purple-50 dark:bg-purple-950/50 flex items-center justify-center text-purple-600">
+                      <Stethoscope className="h-3.5 w-3.5" />
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <span className="text-xl font-bold text-purple-600 dark:text-purple-400">
+                      {recon.summary.totalUsed}
+                    </span>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Clinical Treatments</p>
+                  </div>
+                </div>
+
+                {/* 4. Returned */}
+                <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Returned</span>
+                    <div className="h-6 w-6 rounded-lg bg-amber-50 dark:bg-amber-950/50 flex items-center justify-center text-amber-600">
+                      <RotateCcw className="h-3.5 w-3.5" />
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <span className="text-xl font-bold text-amber-600 dark:text-amber-400">
+                      +{recon.summary.totalReturned}
+                    </span>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Back to Central</p>
+                  </div>
+                </div>
+
+                {/* 5. Sales Amount */}
+                <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Revenue</span>
+                    <div className="h-6 w-6 rounded-lg bg-teal-50 dark:bg-teal-950/50 flex items-center justify-center text-teal-600">
+                      <DollarSign className="h-3.5 w-3.5" />
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <span className="text-xl font-bold text-teal-600 dark:text-teal-400">
+                      ₹{recon.summary.totalSalesAmount.toLocaleString('en-IN')}
+                    </span>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Medicine Sales</p>
+                  </div>
+                </div>
+
+                {/* 6. Expected Closing Stock */}
+                <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Staff Stock</span>
+                    <div className="h-6 w-6 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 flex items-center justify-center text-indigo-600">
+                      <Boxes className="h-3.5 w-3.5" />
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <span className="text-xl font-bold text-indigo-600 dark:text-indigo-400">
+                      {recon.summary.totalExpectedClosing}
+                    </span>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Expected Closing</p>
+                  </div>
+                </div>
+
+                {/* 7. Discrepancies */}
+                <div className={`bg-white dark:bg-slate-955 border rounded-2xl p-3.5 shadow-xs flex flex-col justify-between col-span-2 sm:col-span-1 ${
+                  recon.summary.discrepanciesCount > 0
+                    ? "border-rose-300 dark:border-rose-800 bg-rose-50/20"
+                    : "border-slate-200 dark:border-slate-800"
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Discrepancies</span>
+                    <div className={`h-6 w-6 rounded-lg flex items-center justify-center ${
+                      recon.summary.discrepanciesCount > 0
+                        ? "bg-rose-100 dark:bg-rose-950/70 text-rose-600"
+                        : "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600"
+                    }`}>
+                      {recon.summary.discrepanciesCount > 0 ? (
+                        <AlertTriangle className="h-3.5 w-3.5" />
+                      ) : (
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <span className={`text-xl font-bold ${
+                      recon.summary.discrepanciesCount > 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"
+                    }`}>
+                      {recon.summary.discrepanciesCount}
+                    </span>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      {recon.summary.discrepanciesCount > 0 ? "Items Need Review" : "Full Variance Match"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. SUB-VIEW CONTENT AREA */}
+
+              {/* VIEW A: PRIMARY 12-COLUMN DAILY RECONCILIATION TABLE */}
+              {medicineReportSubView === "reconciliation" && (
+                <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        Staff-Wise End-of-Day Reconciliation
+                        <span className="text-xs font-normal text-slate-500">
+                          ({new Date(reconciliationDate + "T12:00:00.000Z").toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })})
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Formula: Expected Closing = Opening + Issued − Sold − Used − Returned − Damaged/Adjusted
+                      </p>
                     </div>
 
-                    <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col justify-between">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Stock Received</span>
-                        <div className="h-8 w-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 flex items-center justify-center text-emerald-600">
-                          <Package className="h-4 w-4" />
-                        </div>
-                      </div>
-                      <div className="mt-3">
-                        <span className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">+{medAnalytics.totalReceivedInPeriod}</span>
-                        <p className="text-[10px] text-slate-400 mt-0.5">Units Added in Period</p>
-                      </div>
-                    </div>
-
-                    <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col justify-between">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Stock Dispensed</span>
-                        <div className="h-8 w-8 rounded-xl bg-purple-50 dark:bg-purple-950/50 flex items-center justify-center text-purple-600">
-                          <Pill className="h-4 w-4" />
-                        </div>
-                      </div>
-                      <div className="mt-3">
-                        <span className="text-2xl font-bold text-purple-600 dark:text-purple-400">-{medAnalytics.totalDispensedInPeriod}</span>
-                        <p className="text-[10px] text-slate-400 mt-0.5">Units Dispensed in Period</p>
-                      </div>
-                    </div>
-
-                    <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col justify-between">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Low Stock Alert</span>
-                        <div className="h-8 w-8 rounded-xl bg-amber-50 dark:bg-amber-950/50 flex items-center justify-center text-amber-600">
-                          <AlertTriangle className="h-4 w-4" />
-                        </div>
-                      </div>
-                      <div className="mt-3">
-                        <span className="text-2xl font-bold text-amber-600 dark:text-amber-400">{medAnalytics.lowStockCount}</span>
-                        <p className="text-[10px] text-slate-400 mt-0.5">Below Threshold</p>
-                      </div>
-                    </div>
-
-                    <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col justify-between col-span-2 lg:col-span-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Out of Stock</span>
-                        <div className="h-8 w-8 rounded-xl bg-rose-50 dark:bg-rose-950/50 flex items-center justify-center text-rose-600">
-                          <AlertTriangle className="h-4 w-4" />
-                        </div>
-                      </div>
-                      <div className="mt-3">
-                        <span className="text-2xl font-bold text-rose-600 dark:text-rose-400">{medAnalytics.outOfStockCount}</span>
-                        <p className="text-[10px] text-slate-400 mt-0.5">0 Units Remaining</p>
-                      </div>
+                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                      <span>Showing {recon.rows.length} reconciliation item(s)</span>
                     </div>
                   </div>
 
-                  {/* 3. MEDICINE STOCK SUMMARY TABLE */}
-                  <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4">
-                    <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-                      <div>
-                        <h4 className="text-sm font-bold text-slate-900 dark:text-white">Current Stock Levels</h4>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400">Real-time catalogue stock status</p>
-                      </div>
-                    </div>
-
-                    <div className="overflow-x-auto scrollbar-thin">
-                      <table className="w-full text-left border-collapse text-xs font-semibold min-w-[650px]">
-                        <thead>
-                          <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] text-slate-400 uppercase tracking-wider">
-                            <th className="py-3 px-3">Medicine Name</th>
-                            <th className="py-3 px-3">Stock Unit</th>
-                            <th className="py-3 px-3">Available Quantity</th>
-                            <th className="py-3 px-3">Low Threshold</th>
-                            <th className="py-3 px-3">Status</th>
-                            <th className="py-3 px-3 text-right">Actions</th>
+                  <div className="overflow-x-auto scrollbar-thin">
+                    <table className="w-full text-left border-collapse text-xs font-semibold min-w-[1100px]">
+                      <thead>
+                        <tr className="border-b border-slate-200 dark:border-slate-800 text-[10px] text-slate-400 uppercase tracking-wider bg-slate-50/70 dark:bg-slate-900/40">
+                          <th className="py-3 px-3">Staff Member</th>
+                          <th className="py-3 px-3">Medicine</th>
+                          <th className="py-3 px-2 text-center">Opening Stock</th>
+                          <th className="py-3 px-2 text-center text-blue-600">Stock Issued</th>
+                          <th className="py-3 px-2 text-center text-emerald-600">Qty Sold</th>
+                          <th className="py-3 px-2 text-center text-purple-600">Qty Used</th>
+                          <th className="py-3 px-2 text-center text-amber-600">Qty Returned</th>
+                          <th className="py-3 px-2 text-center text-rose-600">Damaged / Adj</th>
+                          <th className="py-3 px-2 text-center font-bold text-slate-900 dark:text-white">Expected Closing</th>
+                          <th className="py-3 px-2 text-center">Actual Closing</th>
+                          <th className="py-3 px-2 text-center">Variance</th>
+                          <th className="py-3 px-3 text-right">Sales Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-slate-700 dark:text-slate-300">
+                        {recon.rows.length === 0 ? (
+                          <tr>
+                            <td colSpan={12} className="py-12 text-center">
+                              <div className="flex flex-col items-center justify-center space-y-2">
+                                <Boxes className="h-8 w-8 text-slate-300 dark:text-slate-600" />
+                                <span className="text-xs font-bold text-slate-600 dark:text-slate-400">
+                                  No staff stock transactions recorded for {new Date(reconciliationDate + "T12:00:00.000Z").toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}.
+                                </span>
+                                <p className="text-[11px] text-slate-400 max-w-sm text-center">
+                                  Issue stock to staff members or record sales/dispensing to populate the daily reconciliation ledger.
+                                </p>
+                                <div className="flex items-center gap-2 pt-2">
+                                  <Button
+                                    type="button"
+                                    onClick={() => handleOpenIssueStock()}
+                                    className="h-8 px-3 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded-xl cursor-pointer"
+                                  >
+                                    <Package className="h-3.5 w-3.5 mr-1" /> Issue Stock Now
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => handleOpenRecordSale()}
+                                    className="h-8 px-3 text-xs rounded-xl cursor-pointer"
+                                  >
+                                    <Pill className="h-3.5 w-3.5 mr-1" /> Record Dispensing
+                                  </Button>
+                                </div>
+                              </div>
+                            </td>
                           </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                          {medicines.map((med) => (
-                            <tr key={med.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30">
-                              <td className="py-3 px-3 font-bold text-slate-900 dark:text-white">{med.name}</td>
-                              <td className="py-3 px-3 text-slate-600 dark:text-slate-300 capitalize">{med.stock_unit}</td>
-                              <td className="py-3 px-3 font-bold">
-                                {med.available_quantity === null || med.available_quantity === undefined ? (
-                                  <span className="text-slate-400 font-normal">-- (Unset)</span>
-                                ) : (
-                                  <span className={med.available_quantity === 0 ? "text-rose-600 dark:text-rose-400" : "text-slate-900 dark:text-white"}>
-                                    {med.available_quantity} {med.stock_unit}
+                        ) : (
+                          recon.rows.map((r, idx) => (
+                            <tr key={`${r.staffId}-${r.medicineId}-${idx}`} className="hover:bg-slate-50/60 dark:hover:bg-slate-900/30 transition-colors">
+                              {/* 1. Staff Member */}
+                              <td className="py-3 px-3 font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                                <div className="flex items-center gap-1.5">
+                                  <div className="h-6 w-6 rounded-full bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold shrink-0">
+                                    {r.staffName.charAt(0)}
+                                  </div>
+                                  <span>{r.staffName}</span>
+                                </div>
+                              </td>
+
+                              {/* 2. Medicine */}
+                              <td className="py-3 px-3 whitespace-nowrap">
+                                <span className="font-bold text-slate-900 dark:text-white">{r.medicineName}</span>
+                                <span className="ml-1.5 text-[10px] text-slate-400 capitalize">({r.stockUnit})</span>
+                              </td>
+
+                              {/* 3. Opening Stock */}
+                              <td className="py-3 px-2 text-center font-mono">
+                                {r.openingStock}
+                              </td>
+
+                              {/* 4. Stock Issued */}
+                              <td className="py-3 px-2 text-center font-mono font-bold text-blue-600 dark:text-blue-400">
+                                {r.stockIssued > 0 ? `+${r.stockIssued}` : "0"}
+                              </td>
+
+                              {/* 5. Quantity Sold */}
+                              <td className="py-3 px-2 text-center font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                {r.quantitySold > 0 ? `-${r.quantitySold}` : "0"}
+                              </td>
+
+                              {/* 6. Quantity Used */}
+                              <td className="py-3 px-2 text-center font-mono font-bold text-purple-600 dark:text-purple-400">
+                                {r.quantityUsed > 0 ? `-${r.quantityUsed}` : "0"}
+                              </td>
+
+                              {/* 7. Quantity Returned */}
+                              <td className="py-3 px-2 text-center font-mono font-bold text-amber-600 dark:text-amber-400">
+                                {r.quantityReturned > 0 ? `-${r.quantityReturned}` : "0"}
+                              </td>
+
+                              {/* 8. Damaged / Adjusted */}
+                              <td className="py-3 px-2 text-center font-mono text-rose-600 dark:text-rose-400">
+                                {r.damagedAdjusted > 0 ? `-${r.damagedAdjusted}` : "0"}
+                              </td>
+
+                              {/* 9. Expected Closing Stock */}
+                              <td className="py-3 px-2 text-center font-mono font-extrabold text-slate-900 dark:text-white bg-slate-50 dark:bg-slate-900/40 rounded-lg">
+                                {r.expectedClosingStock}
+                              </td>
+
+                              {/* 10. Actual Closing Stock */}
+                              <td className="py-3 px-2 text-center font-mono">
+                                {r.actualClosingStock !== undefined ? (
+                                  <span className="font-bold text-slate-900 dark:text-white">
+                                    {r.actualClosingStock}
                                   </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenRecordReturn("physical_count", r.staffId, r.medicineId)}
+                                    className="text-[10px] text-blue-600 hover:text-blue-700 dark:text-blue-400 font-bold underline cursor-pointer"
+                                  >
+                                    + Count
+                                  </button>
                                 )}
                               </td>
-                              <td className="py-3 px-3 text-slate-500 dark:text-slate-400">{med.low_stock_threshold} {med.stock_unit}</td>
-                              <td className="py-3 px-3">{renderStockStatusBadge(getMedicineStockStatus(med))}</td>
-                              <td className="py-3 px-3 text-right">
+
+                              {/* 11. Variance */}
+                              <td className="py-3 px-2 text-center font-mono">
+                                {r.actualClosingStock !== undefined ? (
+                                  r.variance === 0 ? (
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                                      0 (Match)
+                                    </span>
+                                  ) : r.variance > 0 ? (
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                                      +{r.variance} (Surplus)
+                                    </span>
+                                  ) : (
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
+                                      {r.variance} (Shortage)
+                                    </span>
+                                  )
+                                ) : (
+                                  <span className="text-slate-400 font-normal">--</span>
+                                )}
+                              </td>
+
+                              {/* 12. Sales Amount */}
+                              <td className="py-3 px-3 text-right font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                                {r.salesAmount > 0 ? `₹${r.salesAmount.toLocaleString('en-IN')}` : "₹0"}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                      {recon.rows.length > 0 && (
+                        <tfoot>
+                          <tr className="border-t-2 border-slate-300 dark:border-slate-700 font-bold bg-slate-50 dark:bg-slate-900/60 text-slate-900 dark:text-white">
+                            <td colSpan={2} className="py-3 px-3 text-xs uppercase tracking-wider">
+                              Daily Total Reconciliation Summary
+                            </td>
+                            <td className="py-3 px-2 text-center font-mono">
+                              {recon.rows.reduce((s, r) => s + r.openingStock, 0)}
+                            </td>
+                            <td className="py-3 px-2 text-center font-mono text-blue-600 dark:text-blue-400">
+                              +{recon.summary.totalIssued}
+                            </td>
+                            <td className="py-3 px-2 text-center font-mono text-emerald-600 dark:text-emerald-400">
+                              -{recon.summary.totalSold}
+                            </td>
+                            <td className="py-3 px-2 text-center font-mono text-purple-600 dark:text-purple-400">
+                              -{recon.summary.totalUsed}
+                            </td>
+                            <td className="py-3 px-2 text-center font-mono text-amber-600 dark:text-amber-400">
+                              -{recon.summary.totalReturned}
+                            </td>
+                            <td className="py-3 px-2 text-center font-mono text-rose-600 dark:text-rose-400">
+                              -{recon.rows.reduce((s, r) => s + r.damagedAdjusted, 0)}
+                            </td>
+                            <td className="py-3 px-2 text-center font-mono text-indigo-600 dark:text-indigo-400">
+                              {recon.summary.totalExpectedClosing}
+                            </td>
+                            <td className="py-3 px-2 text-center font-mono text-slate-400">
+                              --
+                            </td>
+                            <td className="py-3 px-2 text-center font-mono">
+                              {recon.summary.discrepanciesCount > 0 ? (
+                                <span className="text-rose-600">{recon.summary.discrepanciesCount} Alert(s)</span>
+                              ) : (
+                                <span className="text-emerald-600">All Reconciled</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-3 text-right font-mono text-teal-600 dark:text-teal-400 text-sm">
+                              ₹{recon.summary.totalSalesAmount.toLocaleString('en-IN')}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                  </div>
+
+                  {/* Audit Formula Reference Banner */}
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-[11px] text-slate-500 dark:text-slate-400 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Shield className="h-4 w-4 text-blue-600 shrink-0" />
+                      <span>
+                        <strong>Audit Formula:</strong> Expected Closing Stock = Opening Stock + Stock Issued − Quantity Sold − Quantity Used − Quantity Returned − Damaged/Adjusted
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 shrink-0">
+                      Anchored to Indian Standard Time (IST)
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* VIEW B: STAFF STOCK HOLDINGS (Live current stock held by each staff member) */}
+              {medicineReportSubView === "staff_holdings" && (
+                <div className="space-y-4">
+                  <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs">
+                    <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900 dark:text-white">Active Staff Inventory Holdings</h4>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Current physical medicines held by each clinician and nursing staff member
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        onClick={() => handleOpenIssueStock()}
+                        className="h-8 px-3 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded-xl cursor-pointer"
+                      >
+                        <Package className="h-3.5 w-3.5 mr-1" /> Issue Stock to Staff
+                      </Button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
+                      {staffList.map((st) => {
+                        const heldItems = medicines
+                          .map((m) => ({
+                            medicine: m,
+                            held: calculateStaffHeldStock(st.id, m.id, stockTransactions)
+                          }))
+                          .filter((it) => it.held > 0);
+
+                        return (
+                          <div
+                            key={st.id}
+                            className="bg-slate-50/70 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-3"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 flex items-center justify-center font-bold text-xs">
+                                  {st.name.charAt(0)}
+                                </div>
+                                <div>
+                                  <h5 className="text-xs font-bold text-slate-900 dark:text-white">{st.name}</h5>
+                                  <p className="text-[10px] text-slate-500">{st.role || "Staff Member"}</p>
+                                </div>
+                              </div>
+                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                                {heldItems.length} Medicine(s)
+                              </span>
+                            </div>
+
+                            <div className="divide-y divide-slate-200/60 dark:divide-slate-800 text-xs font-medium">
+                              {heldItems.length === 0 ? (
+                                <p className="text-[11px] text-slate-400 py-3 text-center italic">
+                                  No medicines currently held by {st.name}.
+                                </p>
+                              ) : (
+                                heldItems.map(({ medicine, held }) => (
+                                  <div key={medicine.id} className="py-1.5 flex items-center justify-between">
+                                    <span className="text-slate-800 dark:text-slate-200 font-semibold">{medicine.name}</span>
+                                    <span className="font-mono font-bold text-slate-900 dark:text-white">
+                                      {held} <span className="text-[10px] text-slate-400 capitalize">{medicine.stock_unit}</span>
+                                    </span>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1.5 pt-2 border-t border-slate-200/60 dark:border-slate-800">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => handleOpenRecordSale(st.id)}
+                                className="h-7 text-[11px] flex-1 rounded-lg cursor-pointer font-bold"
+                              >
+                                Record Sale
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => handleOpenRecordReturn("returned_from_staff", st.id)}
+                                className="h-7 text-[11px] flex-1 rounded-lg cursor-pointer font-bold text-amber-600"
+                              >
+                                Return Stock
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* VIEW C: COMPREHENSIVE STOCK MOVEMENT HISTORY AUDIT LOG */}
+              {medicineReportSubView === "history" && (
+                <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white">All Stock Movement Transactions</h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Permanent audit trail of receipts, staff issues, dispensing, returns, and corrections
+                      </p>
+                    </div>
+                    <span className="text-xs text-slate-400 font-semibold">
+                      {stockTransactions.length} recorded movements
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto scrollbar-thin">
+                    <table className="w-full text-left border-collapse text-xs font-semibold min-w-[850px]">
+                      <thead>
+                        <tr className="border-b border-slate-200 dark:border-slate-800 text-[10px] text-slate-400 uppercase tracking-wider bg-slate-50/70 dark:bg-slate-900/40">
+                          <th className="py-3 px-3">Date & Time</th>
+                          <th className="py-3 px-3">Transaction Type</th>
+                          <th className="py-3 px-3">Medicine</th>
+                          <th className="py-3 px-3">Quantity</th>
+                          <th className="py-3 px-3">Central Stock Shift</th>
+                          <th className="py-3 px-3">Staff / Beneficiary</th>
+                          <th className="py-3 px-3">Notes & References</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                        {stockTransactions.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="py-8 text-center text-slate-400">
+                              No stock transactions recorded yet.
+                            </td>
+                          </tr>
+                        ) : (
+                          stockTransactions.slice(0, 100).map((tx) => {
+                            const meta = parseStockTxMeta(tx.notes);
+                            const med = medicines.find(m => m.id === tx.medicine_id);
+                            return (
+                              <tr key={tx.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30">
+                                <td className="py-2.5 px-3 text-slate-500 whitespace-nowrap">
+                                  {new Date(tx.created_at || tx.transaction_date || (tx as any).date).toLocaleString('en-GB', {
+                                    day: '2-digit',
+                                    month: 'short',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold capitalize ${
+                                    tx.transaction_type === "received" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" :
+                                    tx.transaction_type === "issued_to_staff" ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300" :
+                                    tx.transaction_type === "sold" ? "bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300" :
+                                    tx.transaction_type === "used_in_treatment" ? "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300" :
+                                    tx.transaction_type === "returned_from_staff" ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300" :
+                                    tx.transaction_type === "damaged_expired" ? "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300" :
+                                    "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300"
+                                  }`}>
+                                    {tx.transaction_type.replace(/_/g, ' ')}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3 font-bold text-slate-900 dark:text-white">
+                                  {tx.medicine_name || med?.name || "Medicine"}
+                                </td>
+                                <td className="py-2.5 px-3 font-mono font-bold">
+                                  {tx.transaction_type === "received" || tx.transaction_type === "returned_from_staff" ? `+${tx.quantity}` : `-${tx.quantity}`} {med?.stock_unit || ''}
+                                </td>
+                                <td className="py-2.5 px-3 text-slate-500 font-mono">
+                                  {tx.previous_quantity !== null && tx.previous_quantity !== undefined ? tx.previous_quantity : "--"} → {tx.new_quantity !== null && tx.new_quantity !== undefined ? tx.new_quantity : "--"}
+                                </td>
+                                <td className="py-2.5 px-3 text-slate-700 dark:text-slate-300">
+                                  {meta.staff_name || "--"}
+                                  {meta.patient_name && <span className="block text-[10px] text-slate-400">Pt: {meta.patient_name}</span>}
+                                </td>
+                                <td className="py-2.5 px-3 text-slate-500 text-[11px]">
+                                  {meta.supplier_name && <span>Supplier: {meta.supplier_name} | </span>}
+                                  {meta.batch_number && <span>Batch: {meta.batch_number} | </span>}
+                                  {meta.invoice_ref && <span>Inv: {meta.invoice_ref} | </span>}
+                                  {meta.reason || meta.custom_notes || tx.reference || "--"}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* VIEW D: CENTRAL MEDICINE CATALOGUE & THRESHOLDS */}
+              {medicineReportSubView === "catalogue" && (
+                <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white">Central Warehouse Inventory</h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Unallocated stock available for issuing to staff</p>
+                    </div>
+                    {isOwner && (
+                      <Button
+                        type="button"
+                        onClick={handleOpenAddMedicine}
+                        className="h-8 px-3 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded-xl cursor-pointer"
+                      >
+                        <Plus className="h-3.5 w-3.5 mr-1" /> Add Medicine
+                      </Button>
+                    )}
+                  </div>
+
+                  <div className="overflow-x-auto scrollbar-thin">
+                    <table className="w-full text-left border-collapse text-xs font-semibold min-w-[700px]">
+                      <thead>
+                        <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] text-slate-400 uppercase tracking-wider">
+                          <th className="py-3 px-3">Medicine Name</th>
+                          <th className="py-3 px-3">Stock Unit</th>
+                          <th className="py-3 px-3">Central Available</th>
+                          <th className="py-3 px-3">Low Threshold</th>
+                          <th className="py-3 px-3">Status</th>
+                          <th className="py-3 px-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                        {medicines.map((med) => (
+                          <tr key={med.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30">
+                            <td className="py-3 px-3 font-bold text-slate-900 dark:text-white">{med.name}</td>
+                            <td className="py-3 px-3 text-slate-600 dark:text-slate-300 capitalize">{med.stock_unit}</td>
+                            <td className="py-3 px-3 font-bold font-mono">
+                              {med.available_quantity === null || med.available_quantity === undefined ? (
+                                <span className="text-slate-400 font-normal">-- (Unset)</span>
+                              ) : (
+                                <span className={med.available_quantity === 0 ? "text-rose-600 dark:text-rose-400" : "text-slate-900 dark:text-white"}>
+                                  {med.available_quantity} {med.stock_unit}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3 px-3 text-slate-500 font-mono">{med.low_stock_threshold} {med.stock_unit}</td>
+                            <td className="py-3 px-3">{renderStockStatusBadge(getMedicineStockStatus(med))}</td>
+                            <td className="py-3 px-3 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenAddStock(med)}
+                                  className="text-xs text-emerald-600 hover:underline font-bold cursor-pointer"
+                                  title="Add Stock"
+                                >
+                                  + Stock
+                                </button>
+                                <span className="text-slate-300">|</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenIssueStock(med.id)}
+                                  className="text-xs text-blue-600 hover:underline font-bold cursor-pointer"
+                                  title="Issue to Staff"
+                                >
+                                  Issue
+                                </button>
+                                <span className="text-slate-300">|</span>
                                 <button
                                   type="button"
                                   onClick={() => {
                                     setHistoryMedicine(med);
                                     setHistoryModalOpen(true);
                                   }}
-                                  className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-semibold cursor-pointer"
+                                  className="text-xs text-slate-500 hover:underline font-medium cursor-pointer"
                                 >
-                                  Movement History
+                                  History
                                 </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                </>
-              );
-            })()}
-          </div>
-        )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
     );
   };
@@ -15066,13 +16514,48 @@ ${clinicName}`;
                       Configure stock units, thresholds, incoming inventory shipments and adjustments.
                     </p>
                   </div>
-                  <Button
-                    type="button"
-                    onClick={handleOpenAddMedicine}
-                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold h-9 px-4 rounded-xl text-xs flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs"
-                  >
-                    <Plus className="h-4 w-4" /> Add Medicine
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      onClick={() => handleOpenAddStock()}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-9 px-3.5 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      title="Receive incoming stock shipment"
+                    >
+                      <Plus className="h-4 w-4" /> Receive Stock
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => handleOpenIssueStock()}
+                      className="bg-blue-600 hover:bg-blue-500 text-white font-bold h-9 px-3.5 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      title="Issue stock to staff members"
+                    >
+                      <Package className="h-4 w-4" /> Issue to Staff
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => handleOpenRecordSale()}
+                      className="bg-purple-600 hover:bg-purple-500 text-white font-bold h-9 px-3.5 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      title="Record sales or clinical dispensing"
+                    >
+                      <Pill className="h-4 w-4" /> Record Dispensing
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => handleOpenRecordReturn("returned_from_staff")}
+                      className="bg-amber-600 hover:bg-amber-500 text-white font-bold h-9 px-3.5 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      title="Unused staff return or write-off"
+                    >
+                      <RotateCcw className="h-4 w-4" /> Return / Adjust
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={handleOpenAddMedicine}
+                      variant="outline"
+                      className="font-bold h-9 px-3.5 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <Plus className="h-4 w-4" /> Add Medicine
+                    </Button>
+                  </div>
                 </div>
 
                 {/* Filters & Search */}
@@ -15162,10 +16645,18 @@ ${clinicName}`;
                                   <button
                                     type="button"
                                     onClick={() => handleOpenAddStock(m)}
-                                    className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg transition-colors cursor-pointer"
-                                    title="Add Stock"
+                                    className="p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg transition-colors cursor-pointer"
+                                    title="Receive Stock"
                                   >
                                     <Plus className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenIssueStock(m.id)}
+                                    className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg transition-colors cursor-pointer"
+                                    title="Issue Stock to Staff"
+                                  >
+                                    <Package className="h-4 w-4" />
                                   </button>
                                   <button
                                     type="button"
@@ -18084,16 +19575,21 @@ ${clinicName}`;
         </div>
       )}
 
-      {/* ADD STOCK MODAL */}
-      {addStockModalOpen && selectedStockMedicine && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xl max-w-md w-full space-y-5 animate-fadeIn">
+      {/* 1. ADD / RECEIVE STOCK MODAL */}
+      {addStockModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-2xl max-w-lg w-full space-y-5 animate-fadeIn">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Package className="h-5 w-5 text-emerald-600" />
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                  Add Stock – {selectedStockMedicine.name}
-                </h3>
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 flex items-center justify-center">
+                  <Package className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Receive Stock Shipment
+                  </h3>
+                  <p className="text-[11px] text-slate-500">Record incoming medicine inventory from supplier</p>
+                </div>
               </div>
               <button
                 type="button"
@@ -18105,83 +19601,890 @@ ${clinicName}`;
             </div>
 
             <form onSubmit={handleAddStockSubmit} className="space-y-4 text-xs font-semibold">
-              <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl flex items-center justify-between border border-slate-100 dark:border-slate-800">
-                <span className="text-slate-500">Current Stock:</span>
-                <span className="font-bold text-slate-900 dark:text-white text-sm">
-                  {selectedStockMedicine.available_quantity === null ? "Not Configured" : `${selectedStockMedicine.available_quantity} ${selectedStockMedicine.stock_unit}`}
-                </span>
+              {/* Medicine Select */}
+              <div className="space-y-1.5">
+                <Label htmlFor="addStockMedicineSelect" className="text-slate-700 dark:text-slate-300">
+                  Select Medicine <span className="text-rose-500">*</span>
+                </Label>
+                <select
+                  id="addStockMedicineSelect"
+                  value={selectedStockMedicine?.id || ""}
+                  onChange={(e) => {
+                    const found = medicines.find(m => m.id === e.target.value);
+                    if (found) setSelectedStockMedicine(found);
+                  }}
+                  required
+                  className="w-full h-9 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 text-xs text-slate-800 dark:text-slate-200 font-bold cursor-pointer outline-none focus:ring-1 focus:ring-emerald-500"
+                >
+                  {medicines.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name} ({m.available_quantity ?? 0} {m.stock_unit} in central stock)
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="addStockQty" className="text-slate-700 dark:text-slate-300">
-                  Quantity Received <span className="text-rose-500">*</span>
-                </Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="addStockQty"
-                    type="number"
-                    min="1"
-                    placeholder="e.g. 50"
-                    value={addStockQty}
-                    onChange={(e) => setAddStockQty(e.target.value)}
-                    required
-                  />
-                  <span className="text-sm font-bold text-slate-500 dark:text-slate-400 capitalize shrink-0">
-                    {selectedStockMedicine.stock_unit}
+              {selectedStockMedicine && (
+                <div className="p-3 bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30 rounded-xl flex items-center justify-between text-xs">
+                  <span className="text-emerald-800 dark:text-emerald-300 font-semibold">Current Central Stock:</span>
+                  <span className="font-mono font-bold text-emerald-900 dark:text-emerald-200 text-sm">
+                    {selectedStockMedicine.available_quantity === null ? "0" : selectedStockMedicine.available_quantity} {selectedStockMedicine.stock_unit}
                   </span>
+                </div>
+              )}
+
+              {/* Quantity & Date */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="addStockQty" className="text-slate-700 dark:text-slate-300">
+                    Quantity Received <span className="text-rose-500">*</span>
+                  </Label>
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      id="addStockQty"
+                      type="number"
+                      min="1"
+                      placeholder="e.g. 50"
+                      value={addStockQty}
+                      onChange={(e) => setAddStockQty(e.target.value)}
+                      required
+                      className="h-9 text-xs rounded-xl"
+                    />
+                    <span className="text-xs font-bold text-slate-400 capitalize shrink-0">
+                      {selectedStockMedicine?.stock_unit || "units"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="addStockDate" className="text-slate-700 dark:text-slate-300">
+                    Date Received <span className="text-rose-500">*</span>
+                  </Label>
+                  <Input
+                    id="addStockDate"
+                    type="date"
+                    value={addStockDate}
+                    onChange={(e) => setAddStockDate(e.target.value)}
+                    required
+                    className="h-9 text-xs rounded-xl"
+                  />
                 </div>
               </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="addStockDate" className="text-slate-700 dark:text-slate-300">
-                  Date Received
-                </Label>
-                <Input
-                  id="addStockDate"
-                  type="date"
-                  value={addStockDate}
-                  onChange={(e) => setAddStockDate(e.target.value)}
-                />
+              {/* Batch Number & Expiry Date */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="addStockBatch" className="text-slate-700 dark:text-slate-300">
+                    Batch Number <span className="text-slate-400 font-normal">(Optional)</span>
+                  </Label>
+                  <Input
+                    id="addStockBatch"
+                    placeholder="e.g. BT-9082X"
+                    value={addStockBatch}
+                    onChange={(e) => setAddStockBatch(e.target.value)}
+                    className="h-9 text-xs rounded-xl font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="addStockExpiry" className="text-slate-700 dark:text-slate-300">
+                    Expiry Date <span className="text-slate-400 font-normal">(Optional)</span>
+                  </Label>
+                  <Input
+                    id="addStockExpiry"
+                    type="date"
+                    value={addStockExpiry}
+                    onChange={(e) => setAddStockExpiry(e.target.value)}
+                    className="h-9 text-xs rounded-xl"
+                  />
+                </div>
               </div>
 
+              {/* Supplier */}
               <div className="space-y-1.5">
                 <Label htmlFor="addStockSupplier" className="text-slate-700 dark:text-slate-300">
-                  Supplier / Vendor / Batch Ref <span className="text-slate-400 font-normal">(Optional)</span>
+                  Supplier / Vendor Name <span className="text-slate-400 font-normal">(Optional)</span>
                 </Label>
                 <Input
                   id="addStockSupplier"
-                  placeholder="e.g. Apex Pharma Ltd - Batch #4910"
+                  placeholder="e.g. Apex Healthcare Distributors Ltd"
                   value={addStockSupplier}
                   onChange={(e) => setAddStockSupplier(e.target.value)}
+                  className="h-9 text-xs rounded-xl"
                 />
               </div>
 
+              {/* Notes */}
               <div className="space-y-1.5">
                 <Label htmlFor="addStockNotes" className="text-slate-700 dark:text-slate-300">
-                  Notes / Remarks <span className="text-slate-400 font-normal">(Optional)</span>
+                  Notes / Purchase Order Ref <span className="text-slate-400 font-normal">(Optional)</span>
                 </Label>
                 <Input
                   id="addStockNotes"
-                  placeholder="Additional stock entry details..."
+                  placeholder="Invoice # or shipment remarks..."
                   value={addStockNotes}
                   onChange={(e) => setAddStockNotes(e.target.value)}
+                  className="h-9 text-xs rounded-xl"
                 />
               </div>
 
-              <div className="flex justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => setAddStockModalOpen(false)}
-                  className="h-9 px-4 rounded font-semibold cursor-pointer"
+                  disabled={isSubmittingAddStock}
+                  className="h-9 px-4 rounded-xl font-semibold cursor-pointer text-xs"
                 >
                   Cancel
                 </Button>
                 <Button
                   type="submit"
-                  className="h-9 px-5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-2 cursor-pointer"
+                  disabled={isSubmittingAddStock}
+                  className="h-9 px-5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1.5 cursor-pointer text-xs shadow-xs"
                 >
-                  Confirm & Receive Stock
+                  {isSubmittingAddStock ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" /> Saving Stock...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="h-4 w-4" /> Confirm & Receive Stock
+                    </>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 2. ISSUE STOCK TO STAFF MODAL */}
+      {issueStockModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-2xl max-w-xl w-full space-y-5 animate-fadeIn max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 rounded-lg bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                  <Package className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Issue Medicines to Staff
+                  </h3>
+                  <p className="text-[11px] text-slate-500">Deduct from central inventory and allocate to staff member</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIssueStockModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer p-1 rounded-lg text-lg leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <form onSubmit={handleIssueStockSubmit} className="space-y-4 text-xs font-semibold">
+              {/* Staff Member & Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="issueStaffSelect" className="text-slate-700 dark:text-slate-300">
+                    Recipient Staff Member <span className="text-rose-500">*</span>
+                  </Label>
+                  <select
+                    id="issueStaffSelect"
+                    value={issueStaffId}
+                    onChange={(e) => setIssueStaffId(e.target.value)}
+                    required
+                    className="w-full h-9 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 text-xs text-slate-800 dark:text-slate-200 font-bold cursor-pointer outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="">Select staff member...</option>
+                    {staffList.map((st) => (
+                      <option key={st.id} value={st.id}>
+                        {st.name} ({st.role || "Staff Member"})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="issueDate" className="text-slate-700 dark:text-slate-300">
+                    Date of Issue <span className="text-rose-500">*</span>
+                  </Label>
+                  <Input
+                    id="issueDate"
+                    type="date"
+                    value={issueDate}
+                    onChange={(e) => setIssueDate(e.target.value)}
+                    required
+                    className="h-9 text-xs rounded-xl"
+                  />
+                </div>
+              </div>
+
+              {/* Dynamic Multiple Medicines List */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-slate-700 dark:text-slate-300">
+                    Medicines & Quantities <span className="text-rose-500">*</span>
+                  </Label>
+                  <button
+                    type="button"
+                    onClick={() => setIssueItems(prev => [...prev, { medicineId: medicines[0]?.id || "", quantity: "" }])}
+                    className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add Another Medicine
+                  </button>
+                </div>
+
+                <div className="space-y-2 border border-slate-200 dark:border-slate-800 rounded-xl p-3 bg-slate-50/50 dark:bg-slate-900/40">
+                  {issueItems.map((item, idx) => {
+                    const med = medicines.find(m => m.id === item.medicineId);
+                    const avail = med?.available_quantity !== null && med?.available_quantity !== undefined ? med.available_quantity : 0;
+                    return (
+                      <div key={idx} className="flex items-center gap-2 bg-white dark:bg-slate-955 p-2 rounded-lg border border-slate-200 dark:border-slate-800">
+                        {/* Medicine Dropdown */}
+                        <div className="flex-1">
+                          <select
+                            value={item.medicineId}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setIssueItems(prev => prev.map((it, i) => i === idx ? { ...it, medicineId: val } : it));
+                            }}
+                            required
+                            className="w-full h-8 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-2 text-xs font-semibold cursor-pointer outline-none"
+                          >
+                            <option value="">Select medicine...</option>
+                            {medicines.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.name} (Avail: {m.available_quantity ?? 0} {m.stock_unit})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Quantity */}
+                        <div className="w-28 flex items-center gap-1">
+                          <Input
+                            type="number"
+                            min="1"
+                            max={avail}
+                            placeholder="Qty"
+                            value={item.quantity}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setIssueItems(prev => prev.map((it, i) => i === idx ? { ...it, quantity: val } : it));
+                            }}
+                            required
+                            className="h-8 text-xs rounded-lg"
+                          />
+                          <span className="text-[10px] text-slate-400 capitalize shrink-0 w-10 truncate">
+                            {med?.stock_unit || ''}
+                          </span>
+                        </div>
+
+                        {/* Delete Row */}
+                        {issueItems.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setIssueItems(prev => prev.filter((_, i) => i !== idx))}
+                            className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer"
+                            title="Remove row"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div className="space-y-1.5">
+                <Label htmlFor="issueNotes" className="text-slate-700 dark:text-slate-300">
+                  Purpose / Requisition Notes <span className="text-slate-400 font-normal">(Optional)</span>
+                </Label>
+                <Input
+                  id="issueNotes"
+                  placeholder="e.g. Daily chairside dispensing stock, OP department issue..."
+                  value={issueNotes}
+                  onChange={(e) => setIssueNotes(e.target.value)}
+                  className="h-9 text-xs rounded-xl"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIssueStockModalOpen(false)}
+                  disabled={isSubmittingIssue}
+                  className="h-9 px-4 rounded-xl font-semibold cursor-pointer text-xs"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSubmittingIssue}
+                  className="h-9 px-5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold flex items-center gap-1.5 cursor-pointer text-xs shadow-xs"
+                >
+                  {isSubmittingIssue ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" /> Issuing Stock...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="h-4 w-4" /> Confirm & Issue Stock
+                    </>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 3. RECORD SALE / CLINICAL DISPENSING MODAL */}
+      {recordSaleModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-2xl max-w-xl w-full space-y-5 animate-fadeIn max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 rounded-lg bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+                  <Pill className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Record Medicine Sale or Clinical Dispensing
+                  </h3>
+                  <p className="text-[11px] text-slate-500">Deducts from staff-held stock and updates reconciliation ledger</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRecordSaleModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer p-1 rounded-lg text-lg leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <form onSubmit={handleRecordSaleSubmit} className="space-y-4 text-xs font-semibold">
+              {/* Dispensing Mode Segmented Switcher */}
+              <div className="space-y-1.5">
+                <Label className="text-slate-700 dark:text-slate-300">Transaction Classification *</Label>
+                <div className="grid grid-cols-3 gap-1.5 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl">
+                  {[
+                    { id: "sold", label: "Sold to Patient", desc: "Counts in Sales Revenue" },
+                    { id: "used_in_treatment", label: "Used during Treatment", desc: "Clinical Consumption" },
+                    { id: "other_dispensing", label: "Other Dispensing", desc: "Non-sale Allocation" },
+                  ].map((mode) => (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      onClick={() => setSaleUsageType(mode.id as any)}
+                      className={`p-2 rounded-lg text-left transition-all cursor-pointer ${
+                        saleUsageType === mode.id
+                          ? "bg-white dark:bg-slate-800 text-purple-600 dark:text-purple-400 shadow-xs font-bold"
+                          : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                      }`}
+                    >
+                      <div className="text-xs">{mode.label}</div>
+                      <div className="text-[10px] text-slate-400 font-normal">{mode.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Staff Member & Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="saleStaffSelect" className="text-slate-700 dark:text-slate-300">
+                    Dispensing Staff Member <span className="text-rose-500">*</span>
+                  </Label>
+                  <select
+                    id="saleStaffSelect"
+                    value={saleStaffId}
+                    onChange={(e) => setSaleStaffId(e.target.value)}
+                    required
+                    className="w-full h-9 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 text-xs text-slate-800 dark:text-slate-200 font-bold cursor-pointer outline-none focus:ring-1 focus:ring-purple-500"
+                  >
+                    <option value="">Select staff member...</option>
+                    {staffList.map((st) => (
+                      <option key={st.id} value={st.id}>
+                        {st.name} ({st.role || "Staff Member"})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="saleDate" className="text-slate-700 dark:text-slate-300">
+                    Transaction Date <span className="text-rose-500">*</span>
+                  </Label>
+                  <Input
+                    id="saleDate"
+                    type="date"
+                    value={saleDate}
+                    onChange={(e) => setSaleDate(e.target.value)}
+                    required
+                    className="h-9 text-xs rounded-xl"
+                  />
+                </div>
+              </div>
+
+              {/* Patient & Invoice Linking (Optional / For Sales) */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="salePatientName" className="text-slate-700 dark:text-slate-300">
+                    Patient Name <span className="text-slate-400 font-normal">(Optional)</span>
+                  </Label>
+                  <Input
+                    id="salePatientName"
+                    placeholder="e.g. Ramesh Kumar"
+                    value={salePatientName}
+                    onChange={(e) => setSalePatientName(e.target.value)}
+                    className="h-9 text-xs rounded-xl"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="saleInvoiceRef" className="text-slate-700 dark:text-slate-300">
+                    Invoice # Ref <span className="text-slate-400 font-normal">(Optional)</span>
+                  </Label>
+                  <Input
+                    id="saleInvoiceRef"
+                    placeholder="e.g. INV-2026-081"
+                    value={saleInvoiceRef}
+                    onChange={(e) => setSaleInvoiceRef(e.target.value)}
+                    className="h-9 text-xs rounded-xl"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="salePaymentStatus" className="text-slate-700 dark:text-slate-300">
+                    Payment Status
+                  </Label>
+                  <select
+                    id="salePaymentStatus"
+                    value={salePaymentStatus}
+                    onChange={(e) => setSalePaymentStatus(e.target.value as any)}
+                    disabled={saleUsageType !== "sold"}
+                    className="w-full h-9 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 text-xs text-slate-800 dark:text-slate-200 font-semibold cursor-pointer outline-none"
+                  >
+                    <option value="Paid">Paid</option>
+                    <option value="Unpaid">Unpaid</option>
+                    <option value="Included in Procedure">Included in Procedure</option>
+                    <option value="N/A">N/A</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Dynamic Medicines List */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-slate-700 dark:text-slate-300">
+                    Medicines to Dispense / Sell <span className="text-rose-500">*</span>
+                  </Label>
+                  <button
+                    type="button"
+                    onClick={() => setSaleItems(prev => [...prev, { medicineId: medicines[0]?.id || "", quantity: "", unitPrice: "" }])}
+                    className="text-xs text-purple-600 hover:text-purple-700 dark:text-purple-400 font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add Another Medicine
+                  </button>
+                </div>
+
+                <div className="space-y-2 border border-slate-200 dark:border-slate-800 rounded-xl p-3 bg-slate-50/50 dark:bg-slate-900/40">
+                  {saleItems.map((item, idx) => {
+                    const med = medicines.find(m => m.id === item.medicineId);
+                    const held = saleStaffId && item.medicineId
+                      ? calculateStaffHeldStock(saleStaffId, item.medicineId, stockTransactions)
+                      : 0;
+                    const subtotal = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0);
+
+                    return (
+                      <div key={idx} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-white dark:bg-slate-955 p-2 rounded-lg border border-slate-200 dark:border-slate-800">
+                        {/* Medicine Select */}
+                        <div className="flex-1">
+                          <select
+                            value={item.medicineId}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setSaleItems(prev => prev.map((it, i) => i === idx ? { ...it, medicineId: val } : it));
+                            }}
+                            required
+                            className="w-full h-8 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-2 text-xs font-semibold cursor-pointer outline-none"
+                          >
+                            <option value="">Select medicine...</option>
+                            {medicines.map((m) => {
+                              const staffHeld = saleStaffId ? calculateStaffHeldStock(saleStaffId, m.id, stockTransactions) : 0;
+                              return (
+                                <option key={m.id} value={m.id}>
+                                  {m.name} (Staff Holds: {staffHeld} {m.stock_unit})
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+
+                        {/* Quantity */}
+                        <div className="w-24 flex items-center gap-1">
+                          <Input
+                            type="number"
+                            min="1"
+                            max={held}
+                            placeholder="Qty"
+                            value={item.quantity}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setSaleItems(prev => prev.map((it, i) => i === idx ? { ...it, quantity: val } : it));
+                            }}
+                            required
+                            className="h-8 text-xs rounded-lg font-mono"
+                          />
+                          <span className="text-[10px] text-slate-400 capitalize shrink-0 w-8 truncate">
+                            {med?.stock_unit || ''}
+                          </span>
+                        </div>
+
+                        {/* Unit Price (if sold) */}
+                        {saleUsageType === "sold" && (
+                          <div className="w-28 flex items-center gap-1">
+                            <span className="text-xs text-slate-400 font-bold">₹</span>
+                            <Input
+                              type="number"
+                              min="0"
+                              placeholder="Price"
+                              value={item.unitPrice}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setSaleItems(prev => prev.map((it, i) => i === idx ? { ...it, unitPrice: val } : it));
+                              }}
+                              className="h-8 text-xs rounded-lg font-mono"
+                            />
+                          </div>
+                        )}
+
+                        {/* Subtotal Display */}
+                        {saleUsageType === "sold" && (
+                          <div className="w-20 text-right font-mono font-bold text-slate-800 dark:text-slate-200 text-xs">
+                            ₹{subtotal.toLocaleString('en-IN')}
+                          </div>
+                        )}
+
+                        {/* Remove */}
+                        {saleItems.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setSaleItems(prev => prev.filter((_, i) => i !== idx))}
+                            className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer"
+                            title="Remove item"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Total Sale Summary Banner */}
+              {saleUsageType === "sold" && (
+                <div className="p-3 bg-purple-50/50 dark:bg-purple-950/30 border border-purple-100 dark:border-purple-900/40 rounded-xl flex items-center justify-between">
+                  <span className="text-purple-900 dark:text-purple-300 font-bold">Total Transaction Amount:</span>
+                  <span className="font-mono text-base font-extrabold text-purple-700 dark:text-purple-300">
+                    ₹{saleItems.reduce((sum, it) => sum + ((Number(it.quantity) || 0) * (Number(it.unitPrice) || 0)), 0).toLocaleString('en-IN')}
+                  </span>
+                </div>
+              )}
+
+              {/* Notes */}
+              <div className="space-y-1.5">
+                <Label htmlFor="saleNotes" className="text-slate-700 dark:text-slate-300">
+                  Transaction Notes <span className="text-slate-400 font-normal">(Optional)</span>
+                </Label>
+                <Input
+                  id="saleNotes"
+                  placeholder="Additional patient or treatment details..."
+                  value={saleNotes}
+                  onChange={(e) => setSaleNotes(e.target.value)}
+                  className="h-9 text-xs rounded-xl"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setRecordSaleModalOpen(false)}
+                  disabled={isSubmittingSale}
+                  className="h-9 px-4 rounded-xl font-semibold cursor-pointer text-xs"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSubmittingSale}
+                  className="h-9 px-5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold flex items-center gap-1.5 cursor-pointer text-xs shadow-xs"
+                >
+                  {isSubmittingSale ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" /> Recording...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="h-4 w-4" /> Save Transaction
+                    </>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 4. RECORD RETURN / STOCK ADJUSTMENT / PHYSICAL COUNT MODAL */}
+      {recordReturnModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-2xl max-w-lg w-full space-y-5 animate-fadeIn max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 rounded-lg bg-amber-100 dark:bg-amber-950/60 text-amber-600 flex items-center justify-center">
+                  <RotateCcw className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Stock Return & Inventory Reconciliation
+                  </h3>
+                  <p className="text-[11px] text-slate-500">Return unused stock, report damaged units, or enter physical counts</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRecordReturnModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer p-1 rounded-lg text-lg leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <form onSubmit={handleRecordReturnSubmit} className="space-y-4 text-xs font-semibold">
+              {/* Mode Segmented Buttons */}
+              <div className="space-y-1.5">
+                <Label className="text-slate-700 dark:text-slate-300">Action Type *</Label>
+                <div className="grid grid-cols-3 gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl">
+                  {[
+                    { id: "returned_from_staff", label: "Return to Central" },
+                    { id: "damaged_expired", label: "Damaged / Expired" },
+                    { id: "physical_count", label: "Physical Count" },
+                  ].map((mode) => (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      onClick={() => setReturnMode(mode.id as any)}
+                      className={`py-2 px-2 rounded-lg text-center text-xs font-bold transition-all cursor-pointer ${
+                        returnMode === mode.id
+                          ? "bg-white dark:bg-slate-800 text-amber-600 dark:text-amber-400 shadow-xs"
+                          : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                      }`}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Staff Member (for Return or Physical Count, or optional for damaged) */}
+              {(returnMode === "returned_from_staff" || returnMode === "physical_count" || returnMode === "damaged_expired") && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="returnStaffSelect" className="text-slate-700 dark:text-slate-300">
+                    Staff Member {returnMode === "damaged_expired" ? <span className="text-slate-400 font-normal">(Optional - Leave blank for Central Stock)</span> : <span className="text-rose-500">*</span>}
+                  </Label>
+                  <select
+                    id="returnStaffSelect"
+                    value={returnStaffId}
+                    onChange={(e) => setReturnStaffId(e.target.value)}
+                    required={returnMode !== "damaged_expired"}
+                    className="w-full h-9 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 text-xs text-slate-800 dark:text-slate-200 font-bold cursor-pointer outline-none focus:ring-1 focus:ring-amber-500"
+                  >
+                    {returnMode === "damaged_expired" && <option value="">Central Clinic Stock</option>}
+                    {staffList.map((st) => (
+                      <option key={st.id} value={st.id}>
+                        {st.name} ({st.role || "Staff Member"})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Medicine Select */}
+              <div className="space-y-1.5">
+                <Label htmlFor="returnMedSelect" className="text-slate-700 dark:text-slate-300">
+                  Select Medicine <span className="text-rose-500">*</span>
+                </Label>
+                <select
+                  id="returnMedSelect"
+                  value={returnMedicineId}
+                  onChange={(e) => setReturnMedicineId(e.target.value)}
+                  required
+                  className="w-full h-9 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 text-xs text-slate-800 dark:text-slate-200 font-bold cursor-pointer outline-none focus:ring-1 focus:ring-amber-500"
+                >
+                  <option value="">Select medicine...</option>
+                  {medicines.map((m) => {
+                    const held = returnStaffId ? calculateStaffHeldStock(returnStaffId, m.id, stockTransactions) : (m.available_quantity ?? 0);
+                    return (
+                      <option key={m.id} value={m.id}>
+                        {m.name} ({returnStaffId ? `Staff Holds: ${held}` : `Central: ${held}`} {m.stock_unit})
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              {/* Context Banner: shows current held stock */}
+              {returnMedicineId && (() => {
+                const med = medicines.find(m => m.id === returnMedicineId);
+                const held = returnStaffId
+                  ? calculateStaffHeldStock(returnStaffId, returnMedicineId, stockTransactions)
+                  : (med?.available_quantity ?? 0);
+
+                return (
+                  <div className="p-3 bg-amber-50/50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/30 rounded-xl flex items-center justify-between text-xs">
+                    <span className="text-amber-800 dark:text-amber-300 font-semibold">
+                      {returnStaffId ? "Quantity Currently Held by Staff:" : "Central Stock Available:"}
+                    </span>
+                    <span className="font-mono font-bold text-amber-900 dark:text-amber-200 text-sm">
+                      {held} {med?.stock_unit || ''}
+                    </span>
+                  </div>
+                );
+              })()}
+
+              {/* MODE 1 & 2: Quantity to Return / Damaged */}
+              {returnMode !== "physical_count" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="returnQuantity" className="text-slate-700 dark:text-slate-300">
+                    {returnMode === "returned_from_staff" ? "Quantity Returned to Central" : "Damaged / Expired Quantity"} <span className="text-rose-500">*</span>
+                  </Label>
+                  <Input
+                    id="returnQuantity"
+                    type="number"
+                    min="1"
+                    placeholder="Enter quantity"
+                    value={returnQuantity}
+                    onChange={(e) => setReturnQuantity(e.target.value)}
+                    required
+                    className="h-9 text-xs rounded-xl font-mono"
+                  />
+                </div>
+              )}
+
+              {/* MODE 3: Physical Count Audit Input with Real-time Variance */}
+              {returnMode === "physical_count" && (
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="returnActualCount" className="text-slate-700 dark:text-slate-300">
+                      Actual Physical Count Entered by Staff <span className="text-rose-500">*</span>
+                    </Label>
+                    <Input
+                      id="returnActualCount"
+                      type="number"
+                      min="0"
+                      placeholder="e.g. 15"
+                      value={returnActualCount}
+                      onChange={(e) => setReturnActualCount(e.target.value)}
+                      required
+                      className="h-9 text-xs rounded-xl font-mono"
+                    />
+                  </div>
+
+                  {/* Real-time Variance Display */}
+                  {returnActualCount !== "" && returnMedicineId && returnStaffId && (() => {
+                    const held = calculateStaffHeldStock(returnStaffId, returnMedicineId, stockTransactions);
+                    const entered = Number(returnActualCount);
+                    const variance = entered - held;
+
+                    return (
+                      <div className={`p-3 rounded-xl border flex items-center justify-between ${
+                        variance === 0
+                          ? "bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-300"
+                          : variance > 0
+                          ? "bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-950/40 dark:border-blue-800 dark:text-blue-300"
+                          : "bg-rose-50 border-rose-200 text-rose-800 dark:bg-rose-950/40 dark:border-rose-800 dark:text-rose-300"
+                      }`}>
+                        <div>
+                          <span className="font-bold">Audit Variance:</span>
+                          <span className="ml-2 font-mono font-extrabold text-sm">
+                            {variance === 0 ? "0 (Exact Match)" : variance > 0 ? `+${variance} (Surplus)` : `${variance} (Shortage)`}
+                          </span>
+                        </div>
+                        <span className="text-[11px] font-semibold">
+                          Expected: {held} | Actual: {entered}
+                        </span>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* Reason (required for damaged_expired) */}
+              {returnMode === "damaged_expired" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="returnReason" className="text-slate-700 dark:text-slate-300">
+                    Damage / Expiry Reason <span className="text-rose-500">*</span>
+                  </Label>
+                  <Input
+                    id="returnReason"
+                    placeholder="e.g. Expired batch, broken ampoule, contaminated bottle..."
+                    value={returnReason}
+                    onChange={(e) => setReturnReason(e.target.value)}
+                    required
+                    className="h-9 text-xs rounded-xl"
+                  />
+                </div>
+              )}
+
+              {/* Additional Remarks */}
+              <div className="space-y-1.5">
+                <Label htmlFor="returnNotes" className="text-slate-700 dark:text-slate-300">
+                  Audit Remarks <span className="text-slate-400 font-normal">(Optional)</span>
+                </Label>
+                <Input
+                  id="returnNotes"
+                  placeholder="Additional explanation or verification notes..."
+                  value={returnNotes}
+                  onChange={(e) => setReturnNotes(e.target.value)}
+                  className="h-9 text-xs rounded-xl"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setRecordReturnModalOpen(false)}
+                  disabled={isSubmittingReturn}
+                  className="h-9 px-4 rounded-xl font-semibold cursor-pointer text-xs"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSubmittingReturn}
+                  className="h-9 px-5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold flex items-center gap-1.5 cursor-pointer text-xs shadow-xs"
+                >
+                  {isSubmittingReturn ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" /> Recording...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="h-4 w-4" /> Confirm & Record
+                    </>
+                  )}
                 </Button>
               </div>
             </form>
