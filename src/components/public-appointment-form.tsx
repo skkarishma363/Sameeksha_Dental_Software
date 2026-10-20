@@ -5,6 +5,7 @@ import { Calendar, Clock, User, Phone, Mail, Stethoscope, FileText, CheckCircle2
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getTodayDbDate } from "@/lib/date-utils";
 
 interface DoctorOption {
   id: string;
@@ -234,7 +235,7 @@ export function PublicAppointmentForm({ className = "" }: { className?: string }
               name="date"
               type="date"
               required
-              min={new Date().toISOString().split("T")[0]}
+              min={getTodayDbDate()}
               value={formData.date}
               onChange={handleChange}
               className="h-10 rounded-xl bg-slate-50/50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-xs"

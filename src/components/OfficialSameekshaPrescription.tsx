@@ -2,6 +2,7 @@
 
 import React, { useMemo } from "react";
 import { getAssetPath } from "@/lib/getAssetPath";
+import { formatInvoiceDate } from "@/lib/date-utils";
 
 export interface PrescribedMedicineItem {
   name: string;
@@ -125,15 +126,7 @@ export const OfficialSameekshaPrescription: React.FC<OfficialSameekshaPrescripti
   }
 
   // Date: baseline y = 492, x = 780
-  const finalDate =
-    dateStr ||
-    patient.visit ||
-    patient.firstVisit ||
-    new Date().toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    });
+  const finalDate = formatInvoiceDate(dateStr || patient.visit || patient.firstVisit || null);
 
   // Parse structured medicine items
   const parsedMeds = useMemo(() => {

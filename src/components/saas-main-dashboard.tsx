@@ -86,6 +86,26 @@ import { downloadSameekshaInvoicePDF } from "@/lib/invoicePdfGenerator";
 import { createClient } from "@/lib/supabase/client";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import {
+  formatDate,
+  formatTime,
+  formatDateTime,
+  getTodayDbDate,
+  getTodayUiDate,
+  getCurrentTime,
+  getHeaderLiveDate,
+  convertToDbDate,
+  convertToUiDate,
+  parseDateSafe,
+  getMondayOfCurrentWeek,
+  isSameDayInKolkata,
+  isTodayInKolkata,
+  isDateInRange,
+  formatLastVisit,
+  formatInvoiceDate,
+  getNowInKolkata,
+  resolvePatientLastVisit
+} from "@/lib/date-utils";
 
 // Interfaces
 export interface MedicineItem {
@@ -991,7 +1011,7 @@ const parseClinicalNote = (noteStr: string) => {
     const category = parts[1]?.replace("Category: ", "") || "General";
     const author = parts[2]?.replace("Author: ", "") || "Doctor";
     const content = parts[3]?.replace("Content: ", "") || "";
-    const date = parts[4]?.replace("Date: ", "") || "12 Aug 2026";
+    const date = parts[4]?.replace("Date: ", "") || getTodayUiDate();
     return { title, category, author, content, date };
   }
   return {
@@ -999,7 +1019,7 @@ const parseClinicalNote = (noteStr: string) => {
     category: "General",
     author: "Practitioner",
     content: noteStr,
-    date: "12 Aug 2026"
+    date: getTodayUiDate()
   };
 };
 
@@ -1075,11 +1095,11 @@ export function getNextSequentialPatientId(patientsList: Array<{ id?: string; pa
 }
 
 const DEFAULT_MOCK_PATIENTS = [
-  { id: "DS-1001", name: "Aarav Mehta", phone: "+91 98112 09230", age: 28, gender: "Male", address: "MG Road, Bengaluru", visit: "12 Aug 2026", medicalNotes: "Penicillin Allergy", balance: "₹0", status: "Active", dentalChart: { 16: "Root Canal Completed", 30: "Missing" }, prescriptions: ["Amoxicillin 500mg - 3x daily"], files: [{ name: "panorex_xray_mehta.png", size: "4.2 MB", type: "image/png" }], notes: ["Patient experiences cold sensitivity in lower left molar."] },
+  { id: "DS-1001", name: "Aarav Mehta", phone: "+91 98112 09230", age: 28, gender: "Male", address: "MG Road, Bengaluru", visit: "", medicalNotes: "Penicillin Allergy", balance: "₹0", status: "Active", dentalChart: { 16: "Root Canal Completed", 30: "Missing" }, prescriptions: ["Amoxicillin 500mg - 3x daily"], files: [{ name: "panorex_xray_mehta.png", size: "4.2 MB", type: "image/png" }], notes: ["Patient experiences cold sensitivity in lower left molar."] },
   { id: "DS-1002", name: "Priya Patel", phone: "+91 99104 22091", age: 34, gender: "Female", address: "Indiranagar, Bengaluru", visit: "10 Aug 2026", medicalNotes: "None", balance: "₹0", status: "Active", dentalChart: {}, prescriptions: [], files: [], notes: [] },
   { id: "DS-1003", name: "Kabir Singh", phone: "+91 98765 43210", age: 45, gender: "Male", address: "Koramangala, Bengaluru", visit: "08 Aug 2026", medicalNotes: "Latex Allergy, Hypertension", balance: "₹0", status: "Active", dentalChart: { 12: "Decayed" }, prescriptions: ["Paracetamol 650mg - as needed"], files: [], notes: ["Hypertension controlled under clinical prescription."] },
   { id: "DS-1004", name: "Ananya Rao", phone: "+91 95400 12044", age: 19, gender: "Female", address: "Whitefield, Bengaluru", visit: "05 Aug 2026", medicalNotes: "None", balance: "₹0", status: "Active", dentalChart: {}, prescriptions: [], files: [], notes: [] },
-  { id: "DS-1005", name: "Rohan Kumar", phone: "+91 98100 44028", age: 31, gender: "Male", address: "HSR Layout, Bengaluru", visit: "12 Aug 2026", medicalNotes: "Sulfa Drugs Allergy", balance: "₹0", status: "Active", dentalChart: {}, prescriptions: [], files: [], notes: [] },
+  { id: "DS-1005", name: "Rohan Kumar", phone: "+91 98100 44028", age: 31, gender: "Male", address: "HSR Layout, Bengaluru", visit: "", medicalNotes: "Sulfa Drugs Allergy", balance: "₹0", status: "Active", dentalChart: {}, prescriptions: [], files: [], notes: [] },
   { id: "DS-1006", name: "Sneha Reddy", phone: "+91 95408 81229", age: 27, gender: "Female", address: "Jayanagar, Bengaluru", visit: "03 Aug 2026", medicalNotes: "None", balance: "₹0", status: "Active", dentalChart: {}, prescriptions: [], files: [], notes: [] },
   { id: "DS-1007", name: "Rahul Verma", phone: "+91 98110 22912", age: 40, gender: "Male", address: "Malleshwaram, Bengaluru", visit: "28 Jul 2026", medicalNotes: "None", balance: "₹0", status: "Active", dentalChart: {}, prescriptions: [], files: [], notes: [] },
   { id: "DS-1008", name: "Kavya Sharma", phone: "+91 99100 55109", age: 22, gender: "Female", address: "Hebbal, Bengaluru", visit: "25 Jul 2026", medicalNotes: "None", balance: "₹0", status: "Active", dentalChart: {}, prescriptions: [], files: [], notes: [] },
@@ -1148,52 +1168,9 @@ export function renderStockStatusBadge(status: "not_configured" | "out_of_stock"
   }
 }
 
-export function convertToDbDate(uiDate: string): string {
-  if (!uiDate) return new Date().toISOString().split("T")[0];
-  if (/^\d{4}-\d{2}-\d{2}$/.test(uiDate)) return uiDate;
-
-  const parts = uiDate.split(" ");
-  if (parts.length === 3) {
-    const day = parts[0].padStart(2, "0");
-    const monthStr = parts[1].substring(0, 3);
-    const year = parts[2];
-
-    const months: Record<string, string> = {
-      Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
-      Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12"
-    };
-
-    const month = months[monthStr] || "01";
-    return `${year}-${month}-${day}`;
-  }
-
-  try {
-    const d = new Date(uiDate);
-    if (!isNaN(d.getTime())) {
-      return d.toISOString().split("T")[0];
-    }
-  } catch (e) {}
-
-  return uiDate;
-}
-
-export function convertToUiDate(dbDate: string): string {
-  if (!dbDate) return "12 Aug 2026";
-  const parts = dbDate.split("-");
-  if (parts.length === 3) {
-    const year = parts[0];
-    const monthNum = parts[1];
-    const day = parts[2].padStart(2, "0");
-
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const monthIndex = parseInt(monthNum, 10) - 1;
-    const month = months[monthIndex] || "Jan";
-
-    return `${day} ${month} ${year}`;
-  }
-  return dbDate;
-}
-
+// Date parsing & conversion helpers delegated to centralized @/lib/date-utils
+export { convertToDbDate, convertToUiDate, getMondayOfCurrentWeek };
+export const parseToDate = parseDateSafe;
 export function formatWhatsAppRecipientNumber(phoneStr: string): string {
   if (!phoneStr) return "";
   const digits = phoneStr.trim().replace(/\D/g, "");
@@ -1201,39 +1178,6 @@ export function formatWhatsAppRecipientNumber(phoneStr: string): string {
   if (digits.length === 12 && digits.startsWith("91")) return digits;
   if (digits.length === 10) return `91${digits}`;
   return digits;
-}
-
-export function parseToDate(dateStr: string): Date | null {
-  if (!dateStr) return null;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    const [y, m, d] = dateStr.split("-").map(Number);
-    return new Date(y, m - 1, d);
-  }
-  const parts = dateStr.split(" ");
-  if (parts.length === 3) {
-    const day = parseInt(parts[0], 10);
-    const monthStr = parts[1].substring(0, 3);
-    const year = parseInt(parts[2], 10);
-    const months: Record<string, number> = {
-      Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
-      Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11
-    };
-    const month = months[monthStr] ?? 0;
-    if (!isNaN(day) && !isNaN(year)) {
-      return new Date(year, month, day);
-    }
-  }
-  const d = new Date(dateStr);
-  return isNaN(d.getTime()) ? null : d;
-}
-
-export function getMondayOfCurrentWeek(d: Date = new Date()): Date {
-  const date = new Date(d);
-  const day = date.getDay();
-  const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(date.setDate(diff));
-  monday.setHours(0, 0, 0, 0);
-  return monday;
 }
 
 export function normalizeTimeSlot(timeStr: string): string {
@@ -1307,98 +1251,99 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
 
   const fetchClinicData = async () => {
     try {
-      // 1. Fetch patients
-      const { data: dbPatients, error: patErr } = await supabase
-      .from("patients")
-      .select("*")
-      .order("created_at", { ascending: false });
+      // 1. Fetch patients, patient files, appointments, and treatments in parallel
+      const [
+        { data: dbPatients, error: patErr },
+        { data: dbPatientFiles, error: pfFetchErr },
+        { data: dbAppointments, error: apptErr },
+        { data: dbTreatments, error: treatErr }
+      ] = await Promise.all([
+        supabase.from("patients").select("*").order("created_at", { ascending: false }),
+        supabase.from("patient_files").select("*").order("created_at", { ascending: false }),
+        supabase.from("appointments").select("*").order("created_at", { ascending: true }),
+        supabase.from("treatments").select("*").order("created_at", { ascending: false })
+      ]);
 
-    if (patErr) {
-      console.error("Failed to load patients from database:", patErr.message, patErr.code);
-      showToast("Error loading patients from database.", "error");
-      return;
-    }
-
-    if (dbPatients) {
-      if (dbPatients.length === 0) {
-        await seedMockPatients();
-        // Re-fetch data statefully after insert completion
-        return fetchClinicData();
+      if (patErr) {
+        console.error("Failed to load patients from database:", patErr.message, patErr.code);
+        showToast("Error loading patients from database.", "error");
+        return;
       }
-
-      // Fetch relational patient files from patient_files table
-      const { data: dbPatientFiles, error: pfFetchErr } = await supabase
-        .from("patient_files")
-        .select("*")
-        .order("created_at", { ascending: false });
 
       if (pfFetchErr) {
         console.warn("Could not load patient_files table:", pfFetchErr.message);
       }
 
-      const mappedPatients: Patient[] = dbPatients.map(p => {
-        // Map files from public.patient_files
-        const relFiles: FileAttachment[] = (dbPatientFiles || [])
-          .filter((pf: any) => pf.patient_id === p.id || pf.patient_id === p.patient_id)
-          .map((pf: any) => ({
-            id: pf.id,
-            name: pf.name,
-            size: formatFileSize(pf.file_size),
-            type: extractCategoryFromPath(pf.storage_path, "X-Ray Scan"),
-            category: extractCategoryFromPath(pf.storage_path, "X-Ray Scan"),
-            mime_type: pf.mime_type || "application/octet-stream",
-            file_size: pf.file_size,
-            storage_path: pf.storage_path,
-            created_at: pf.created_at
-          }));
+      if (dbPatients) {
+        if (dbPatients.length === 0) {
+          await seedMockPatients();
+          // Re-fetch data statefully after insert completion
+          return fetchClinicData();
+        }
 
-        // Merge with existing p.files JSON array if legacy entries exist (avoiding duplicates)
-        const legacyFiles: FileAttachment[] = Array.isArray(p.files)
-          ? p.files
-              .filter((lf: any) => !relFiles.some(rf => rf.id === lf.id || rf.name === lf.name || (lf.storage_path && rf.storage_path === lf.storage_path)))
-              .map((lf: any) => ({
-                id: lf.id,
-                name: lf.name || "Attachment",
-                size: lf.size || "1.0 MB",
-                type: lf.type || lf.category || "X-Ray Scan",
-                category: lf.category || lf.type || "X-Ray Scan",
-                mime_type: lf.mime_type,
-                file_size: lf.file_size,
-                storage_path: lf.storage_path,
-                created_at: lf.created_at
-              }))
-          : [];
+        const mappedPatients: Patient[] = dbPatients.map(p => {
+          // Map files from public.patient_files
+          const relFiles: FileAttachment[] = (dbPatientFiles || [])
+            .filter((pf: any) => pf.patient_id === p.id || pf.patient_id === p.patient_id)
+            .map((pf: any) => ({
+              id: pf.id,
+              name: pf.name,
+              size: formatFileSize(pf.file_size),
+              type: extractCategoryFromPath(pf.storage_path, "X-Ray Scan"),
+              category: extractCategoryFromPath(pf.storage_path, "X-Ray Scan"),
+              mime_type: pf.mime_type || "application/octet-stream",
+              file_size: pf.file_size,
+              storage_path: pf.storage_path,
+              created_at: pf.created_at
+            }));
 
-        const combinedFiles = [...relFiles, ...legacyFiles];
+          // Merge with existing p.files JSON array if legacy entries exist (avoiding duplicates)
+          const legacyFiles: FileAttachment[] = Array.isArray(p.files)
+            ? p.files
+                .filter((lf: any) => !relFiles.some(rf => rf.id === lf.id || rf.name === lf.name || (lf.storage_path && rf.storage_path === lf.storage_path)))
+                .map((lf: any) => ({
+                  id: lf.id,
+                  name: lf.name || "Attachment",
+                  size: lf.size || "1.0 MB",
+                  type: lf.type || lf.category || "X-Ray Scan",
+                  category: lf.category || lf.type || "X-Ray Scan",
+                  mime_type: lf.mime_type,
+                  file_size: lf.file_size,
+                  storage_path: lf.storage_path,
+                  created_at: lf.created_at
+                }))
+            : [];
 
-        return {
-          id: p.patient_id,
-          uuid: p.id,
-          name: p.name,
-          phone: p.phone,
-          age: p.age || 0,
-          gender: (p.gender === "Male" || p.gender === "Female") ? p.gender : "Male",
-          address: p.address || "",
-          visit: p.visit || "",
-          medicalNotes: p.medical_notes || "None",
-          balance: p.balance || "₹0",
-          status: (p.status === "Active" || p.status === "Inactive" || p.status === "Archived") ? p.status : "Active",
-          dentalChart: p.dental_chart || {},
-          prescriptions: p.prescriptions || [],
-          files: combinedFiles,
-          notes: p.notes || [],
-          email: p.email || undefined,
-          bloodGroup: p.blood_group || undefined,
-          patientType: p.patient_type || undefined,
-          occupation: p.occupation || undefined,
-          reference: p.reference || undefined,
-          medicalHistory: Array.isArray(p.medical_history) ? p.medical_history : [],
-          medicalHistoryOthers: p.medical_history_others || undefined,
-          createdAt: p.created_at || undefined
-        };
-      });
-      setPatients(mappedPatients);
-    }
+          const combinedFiles = [...relFiles, ...legacyFiles];
+
+          return {
+            id: p.patient_id,
+            uuid: p.id,
+            name: p.name,
+            phone: p.phone,
+            age: p.age || 0,
+            gender: (p.gender === "Male" || p.gender === "Female") ? p.gender : "Male",
+            address: p.address || "",
+            visit: resolvePatientLastVisit(p, (dbAppointments as any) || [], (dbTreatments as any) || []),
+            medicalNotes: p.medical_notes || "None",
+            balance: p.balance || "₹0",
+            status: (p.status === "Active" || p.status === "Inactive" || p.status === "Archived") ? p.status : "Active",
+            dentalChart: p.dental_chart || {},
+            prescriptions: p.prescriptions || [],
+            files: combinedFiles,
+            notes: p.notes || [],
+            email: p.email || undefined,
+            bloodGroup: p.blood_group || undefined,
+            patientType: p.patient_type || undefined,
+            occupation: p.occupation || undefined,
+            reference: p.reference || undefined,
+            medicalHistory: Array.isArray(p.medical_history) ? p.medical_history : [],
+            medicalHistoryOthers: p.medical_history_others || undefined,
+            createdAt: p.created_at || undefined
+          };
+        });
+        setPatients(mappedPatients);
+      }
 
     // 2. Fetch doctors (MUST BE RETRIEVED BEFORE INVOICES & APPOINTMENTS TO PREVENT TDZ REFERENCE ERROR)
     const { data: dbDoctors, error: docErr } = await supabase
@@ -1473,11 +1418,11 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
             ? inv.payments.map((p: any) => ({
                 method: p.payment_method || "Cash",
                 amount: Number(p.amount) || 0,
-                date: p.payment_date || (inv.created_at ? convertToUiDate(inv.created_at.split("T")[0]) : "")
+                date: p.payment_date ? convertToUiDate(p.payment_date) : (inv.created_at ? convertToUiDate(inv.created_at) : "")
               }))
             : [];
 
-          const firstPayDate = payLogs[0]?.date || (inv.status === "Paid" && inv.created_at ? convertToUiDate(inv.created_at.split("T")[0]) : "");
+          const firstPayDate = payLogs[0]?.date || (inv.status === "Paid" && inv.created_at ? convertToUiDate(inv.created_at) : "");
 
           invoicesMap.set(inv.invoice_id, {
             id: inv.invoice_id,
@@ -1550,12 +1495,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       setInvoices(Array.from(invoicesMap.values()));
     }
 
-    // 4. Fetch appointments
-    const { data: dbAppointments, error: apptErr } = await supabase
-      .from("appointments")
-      .select("*")
-      .order("created_at", { ascending: true });
-
+    // 4. Map appointments (already retrieved in parallel Step 1)
     if (apptErr) {
       console.error("Failed to load appointments from database:", apptErr.message, apptErr.code);
       showToast("Error loading appointments from database.", "error");
@@ -1604,7 +1544,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         id: act.id,
         type: (act.entity_type as any) || "Register",
         msg: act.description,
-        time: act.created_at ? convertToUiDate(act.created_at.split("T")[0]) : "Today"
+        time: act.created_at ? formatDateTime(act.created_at) : "Today"
       }));
       setActivities(mappedAct);
     }
@@ -1619,12 +1559,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       setNotifications(dbNotifs.map(n => ({ id: n.id, msg: n.message, unread: !n.is_read })));
     }
 
-    // 8. Fetch treatments
-    const { data: dbTreatments, error: treatErr } = await supabase
-      .from("treatments")
-      .select("*")
-      .order("created_at", { ascending: false });
-
+    // 8. Map treatments (already retrieved in parallel Step 1)
     if (treatErr) {
       console.error("Failed to load treatments from database:", treatErr.message, treatErr.code);
       showToast("Error loading treatments from database.", "error");
@@ -1640,7 +1575,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
           doctor: docRecord ? docRecord.name : "",
           stage: (t.stage === "Completed" || t.stage === "In Progress") ? t.stage : "Planned",
           notes: t.notes || "",
-          nextVisit: "19 Aug 2026",
+          nextVisit: (t as any).next_visit ? convertToUiDate((t as any).next_visit) : "—",
           prescription: "",
           tooth: t.tooth_number || undefined,
           cost: t.cost !== null && t.cost !== undefined ? Number(t.cost) : undefined,
@@ -1842,9 +1777,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         if (rawMethod.toLowerCase().includes("upi") || rawMethod.toLowerCase().includes("gpay")) normMethod = "UPI";
         else if (rawMethod.toLowerCase().includes("card")) normMethod = "Card";
 
-        const payDateStr = newInvoice.paymentDate && newInvoice.paymentDate.includes("-")
-          ? newInvoice.paymentDate
-          : new Date().toISOString().split("T")[0];
+        const payDateStr = convertToDbDate(newInvoice.paymentDate);
 
         const { error: payErr } = await supabase
           .from("payments")
@@ -2056,7 +1989,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
   const [addStockModalOpen, setAddStockModalOpen] = useState(false);
   const [selectedStockMedicine, setSelectedStockMedicine] = useState<MedicineItem | null>(null);
   const [addStockQty, setAddStockQty] = useState("");
-  const [addStockDate, setAddStockDate] = useState(new Date().toISOString().split("T")[0]);
+  const [addStockDate, setAddStockDate] = useState(getTodayDbDate());
   const [addStockSupplier, setAddStockSupplier] = useState("");
   const [addStockNotes, setAddStockNotes] = useState("");
 
@@ -2065,7 +1998,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
   const [adjustStockMedicine, setAdjustStockMedicine] = useState<MedicineItem | null>(null);
   const [adjustStockNewQty, setAdjustStockNewQty] = useState("");
   const [adjustStockReason, setAdjustStockReason] = useState("");
-  const [adjustStockDate, setAdjustStockDate] = useState(new Date().toISOString().split("T")[0]);
+  const [adjustStockDate, setAdjustStockDate] = useState(getTodayDbDate());
 
   // Movement Log / History Modal State
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
@@ -2289,7 +2222,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     setEditInvoiceTotal(inv.total || 0);
     setEditInvoicePaidAmount(inv.paidAmount || 0);
     setEditInvoiceStatus(inv.status || "Pending");
-    setEditInvoicePaymentDate(inv.paymentDate || "12 Aug 2026");
+    setEditInvoicePaymentDate(inv.paymentDate || "");
   };
 
   const handleSaveEditInvoice = async (e: React.FormEvent) => {
@@ -2422,7 +2355,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
   const [apptDoctor, setApptDoctor] = useState("Dr. Deepa Kodali");
   const [apptTreatment, setApptTreatment] = useState("Consultation");
   const [apptTime, setApptTime] = useState("09:00 AM");
-  const [apptDate, setApptDate] = useState("12 Aug 2026");
+  const [apptDate, setApptDate] = useState(() => getTodayUiDate());
   const [apptNotes, setApptNotes] = useState("");
 
   // Consultation clinical workspace inputs
@@ -2450,34 +2383,29 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
   // Timeframe filter for reports page
   const [reportsFilter, setReportsFilter] = useState<string>("Today");
   const [customRangeModalOpen, setCustomRangeModalOpen] = useState(false);
-  const [customStartDate, setCustomStartDate] = useState("2026-08-01");
-  const [customEndDate, setCustomEndDate] = useState("2026-08-14");
+  const [customStartDate, setCustomStartDate] = useState(() => {
+    const today = getTodayDbDate();
+    const parts = today.split("-");
+    return `${parts[0]}-${parts[1]}-01`;
+  });
+  const [customEndDate, setCustomEndDate] = useState(() => getTodayDbDate());
   const [appliedCustomLabel, setAppliedCustomLabel] = useState<string | null>(null);
   const [patientsPeriod, setPatientsPeriod] = useState<"Today" | "This Week" | "This Month" | "Last Month" | "This Year" | "Custom Range">("This Month");
 
   // Redesigned dashboard state variables
-  const getTodayLocalDateStr = (): string => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, "0");
-    const d = String(now.getDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
-  };
-
-  const dynamicTodayUiDate = convertToUiDate(getTodayLocalDateStr());
-  const [selectedCalendarDay, setSelectedCalendarDay] = useState(dynamicTodayUiDate);
+  const dynamicTodayUiDate = getTodayUiDate();
+  const [selectedCalendarDay, setSelectedCalendarDay] = useState(() => getTodayUiDate());
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(() => getMondayOfCurrentWeek());
   const [blockedSlots, setBlockedSlots] = useState<Record<string, boolean>>({});
-  const [currentHeaderDate, setCurrentHeaderDate] = useState<string>("");
+  const [currentHeaderDate, setCurrentHeaderDate] = useState<string>(() => getHeaderLiveDate());
 
   useEffect(() => {
     const updateHeaderDate = () => {
-      const d = new Date();
-      const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-      setCurrentHeaderDate(`${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`);
+      setCurrentHeaderDate(getHeaderLiveDate());
     };
     updateHeaderDate();
+    const timer = setInterval(updateHeaderDate, 60000);
+    return () => clearInterval(timer);
   }, []);
 
   // Add Patient quick panel inputs
@@ -2550,34 +2478,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
   const [noteAuthor, setNoteAuthor] = useState("Dr. Deepa Kodali");
 
   // Media Gallery states
-  const [patientMedia, setPatientMedia] = useState<ClinicalMedia[]>([
-    {
-      id: "media-1",
-      patientId: "DS-1001",
-      name: "intraoral_photo_mehta.png",
-      type: "image/png",
-      category: "Clinical Photos",
-      url: "https://images.unsplash.com/photo-1606811971618-4486d14f3f99?q=80&w=600&auto=format&fit=crop",
-      uploadDate: "12 Aug 2026",
-      uploadedBy: "Dr. Deepa Kodali",
-      toothNumber: "16",
-      treatment: "Root Canal Therapy",
-      appointment: "12 Aug 2026 at 09:00 AM",
-      prescription: "Amoxicillin 500mg"
-    },
-    {
-      id: "media-2",
-      patientId: "DS-1001",
-      name: "patient_consent_recording.mp4",
-      type: "video/mp4",
-      category: "Consent Video Recordings",
-      url: "https://www.w3schools.com/html/mov_bbb.mp4",
-      uploadDate: "10 Aug 2026",
-      uploadedBy: "Dr. Deepa Kodali",
-      treatment: "Consultation",
-      appointment: "10 Aug 2026"
-    }
-  ]);
+  const [patientMedia, setPatientMedia] = useState<ClinicalMedia[]>([]);
   const [mediaFilter, setMediaFilter] = useState("All");
   const [selectedMediaForPreview, setSelectedMediaForPreview] = useState<ClinicalMedia | null>(null);
   const [mediaToEdit, setMediaToEdit] = useState<ClinicalMedia | null>(null);
@@ -2758,7 +2659,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       type: "video/webm",
       category: "Consent Video Recordings",
       url: recordedVideoUrl || "https://www.w3schools.com/html/mov_bbb.mp4",
-      uploadDate: new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
+      uploadDate: getTodayUiDate(),
       uploadedBy: docName,
       prescription: `Duration: ${durationStr}`
     };
@@ -2859,7 +2760,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         url: isVideo
           ? "https://www.w3schools.com/html/mov_bbb.mp4"
           : "https://images.unsplash.com/photo-1606811971618-4486d14f3f99?q=80&w=600&auto=format&fit=crop",
-        uploadDate: new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
+        uploadDate: getTodayUiDate(),
         uploadedBy: prescDoctor || (doctors[0]?.name || "Dr. Deepa Kodali")
       };
     });
@@ -3106,7 +3007,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
 
   // --- PRESCRIPTION BUILDER STATES ---
   const [prescDoctor, setPrescDoctor] = useState("");
-  const [prescDate, setPrescDate] = useState("");
+  const [prescDate, setPrescDate] = useState(() => getTodayDbDate());
   const [prescDiagnosis, setPrescDiagnosis] = useState("");
   const [prescAdvice, setPrescAdvice] = useState("");
   const [prescMeds, setPrescMeds] = useState<{ name: string; dosage: string; freq: string; duration: string; instructions: string }[]>([
@@ -3204,14 +3105,6 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
 
   const [patients, setPatients] = useState<Patient[]>([]);
 
-  const MOCK_APPOINTMENTS: Appointment[] = [
-    { id: "appt-1", patientId: "DS-1001", patientName: "Aarav Mehta", doctor: "Dr. Deepa Kodali", treatment: "Root Canal", time: "09:00 AM", date: "12 Aug 2026", status: "Scheduled", notes: "Lower left molar treatment.", avatarColor: "bg-blue-100 text-blue-600" },
-    { id: "appt-2", patientId: "DS-1002", patientName: "Priya Patel", doctor: "Dr. Raghuram", treatment: "Scaling", time: "09:30 AM", date: "12 Aug 2026", status: "Scheduled", notes: "Routine scale and polish.", avatarColor: "bg-cyan-100 text-cyan-600" },
-    { id: "appt-3", patientId: "DS-1003", patientName: "Kabir Singh", doctor: "Dr. Deepa Kodali", treatment: "Root Canal", time: "10:00 AM", date: "12 Aug 2026", status: "Scheduled", notes: "Penicillin allergy precaution.", avatarColor: "bg-purple-100 text-purple-600" },
-    { id: "appt-4", patientId: "DS-1004", patientName: "Ananya Rao", doctor: "Dr. Srinivasa", treatment: "Implant", time: "10:30 AM", date: "12 Aug 2026", status: "Scheduled", notes: "Surgical post review.", avatarColor: "bg-emerald-100 text-emerald-600" },
-    { id: "appt-5", patientId: "DS-1005", patientName: "Rohan Kumar", doctor: "Dr. Priyanka Mane Pado", treatment: "Crown", time: "11:00 AM", date: "12 Aug 2026", status: "Scheduled", notes: "Crown margins assessment.", avatarColor: "bg-indigo-100 text-indigo-600" }
-  ];
-
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [blockedSlotsList, setBlockedSlotsList] = useState<any[]>([]);
 
@@ -3242,9 +3135,8 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
 
       if (!error && data) {
         const formattedItems: BackupHistoryItem[] = data.map((row: any) => {
-          const d = new Date(row.created_at);
-          const dateStr = d.toLocaleDateString("en-GB", { day: '2-digit', month: 'short', year: 'numeric' });
-          const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const dateStr = formatDate(row.created_at);
+          const timeStr = formatTime(row.created_at);
 
           let formattedSize = "--";
           if (row.backup_size !== null && row.backup_size !== undefined && row.backup_size !== "") {
@@ -3537,7 +3429,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
           notes: editTreatmentAdvised.trim(),
           nextVisit: "",
           prescription: "",
-          date: new Date().toISOString().split("T")[0]
+          date: getTodayDbDate()
         };
         setTreatments(prev => [...prev, newTreatObj]);
       }
@@ -3656,7 +3548,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       setChartDoctor(doctors[0].name);
     }
     if (!chartDate) {
-      setChartDate(new Date().toISOString().split("T")[0]);
+      setChartDate(getTodayDbDate());
     }
   };
 
@@ -3952,7 +3844,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       cost: costAmt,
       diagnosis: newTrDiagnosis.trim() || null,
       notes: newTrNotes.trim() || null,
-      treatment_date: new Date().toISOString().split("T")[0]
+      treatment_date: getTodayDbDate()
     };
 
     const { data: insertedTreatment, error: treatInsErr } = await supabase
@@ -4142,7 +4034,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
 
     let updatedNotes = [...(patientItem.notes || [])];
     if (noteTitle.trim() && noteContent.trim()) {
-      const dateStr = prescDate ? new Date(prescDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+      const dateStr = prescDate ? convertToUiDate(prescDate) : getTodayUiDate();
       const formattedNote = `Title: ${noteTitle.trim()} | Category: ${noteCategory} | Author: ${noteAuthor} | Content: ${noteContent.trim()} | Date: ${dateStr}`;
       updatedNotes = [...updatedNotes, formattedNote];
     }
@@ -4150,7 +4042,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     const docName = prescDoctor || (doctors[0]?.name || "");
 
     const newFile = {
-      name: `prescription_${new Date(prescDate || Date.now()).toISOString().slice(0,10)}.pdf`,
+      name: `prescription_${prescDate || getTodayDbDate()}.pdf`,
       size: "1.5 KB",
       type: "application/pdf"
     };
@@ -4180,7 +4072,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         await supabase.from("prescriptions").insert({
           patient_id: patDbUuid,
           doctor_id: docDbUuid,
-          prescription_date: prescDate || new Date().toISOString().split("T")[0],
+          prescription_date: prescDate || getTodayDbDate(),
           diagnosis: prescDiagnosis || "Clinical Consultation",
           advice: prescAdvice || "",
           medicines: prescMeds
@@ -4254,7 +4146,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       isOpen: true,
       patient: patientItem,
       medicines: prescMeds,
-      dateStr: prescDate || new Date().toISOString().split("T")[0],
+      dateStr: prescDate ? convertToUiDate(prescDate) : getTodayUiDate(),
       diagnosis: prescDiagnosis,
       advice: prescAdvice,
       doctorName: prescDoctor || "Dr. Suvarna Raju.P"
@@ -4278,7 +4170,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       const res = await downloadSameekshaPrescriptionPDF({
         patient: patientItem,
         medicines: meds,
-        dateStr: customPresc?.dateStr || prescDate || new Date().toISOString().split("T")[0],
+        dateStr: customPresc?.dateStr || (prescDate ? convertToUiDate(prescDate) : getTodayUiDate()),
         diagnosis: customPresc?.diagnosis || prescDiagnosis,
         advice: customPresc?.advice || prescAdvice,
         doctorName: customPresc?.doctorName || prescDoctor || "Dr. Suvarna Raju.P"
@@ -4327,7 +4219,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     const patientItem = patients.find(p => p.id === selectedPatientId);
     if (!patientItem) return;
 
-    const dateStr = prescDate ? new Date(prescDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+    const dateStr = prescDate ? convertToUiDate(prescDate) : getTodayUiDate();
     const formattedNote = `Title: ${noteTitle.trim()} | Category: ${noteCategory} | Author: ${noteAuthor} | Content: ${noteContent.trim()} | Date: ${dateStr}`;
 
     const updatedNotes = [...(patientItem.notes || []), formattedNote];
@@ -4491,8 +4383,8 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       total,
       paidAmount: paid,
       status: pending === 0 ? "Paid" : paid > 0 ? "Partially Paid" : "Pending",
-      paymentDate: paid > 0 ? new Date().toISOString().split("T")[0] : "",
-      paymentLogs: paid > 0 ? [{ method: invMode, amount: paid, date: new Date().toISOString().split("T")[0] }] : []
+      paymentDate: paid > 0 ? getTodayUiDate() : "",
+      paymentLogs: paid > 0 ? [{ method: invMode, amount: paid, date: getTodayUiDate() }] : []
     };
 
     const savedUuid = await persistInvoiceRecord(newInvoice);
@@ -5016,7 +4908,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
   const handleOpenAddStock = (med: MedicineItem) => {
     setSelectedStockMedicine(med);
     setAddStockQty("");
-    setAddStockDate(new Date().toISOString().split("T")[0]);
+    setAddStockDate(getTodayDbDate());
     setAddStockSupplier("");
     setAddStockNotes("");
     setAddStockModalOpen(true);
@@ -5091,7 +4983,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     setAdjustStockMedicine(med);
     setAdjustStockNewQty(med.available_quantity !== null ? String(med.available_quantity) : "");
     setAdjustStockReason("");
-    setAdjustStockDate(new Date().toISOString().split("T")[0]);
+    setAdjustStockDate(getTodayDbDate());
     setAdjustStockModalOpen(true);
   };
 
@@ -5538,7 +5430,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         prescriptions: updatedPrescriptions,
         files: updatedFiles,
         notes: updatedNotes,
-        visit: "12 Aug 2026"
+        visit: getTodayUiDate()
       })
       .eq("patient_id", appt.patientId);
 
@@ -5596,7 +5488,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         tooth_number: consultSelectedTooth || null,
         cost: treatmentCost,
         notes: consultNotes.trim() || null,
-        treatment_date: new Date().toISOString().split("T")[0]
+        treatment_date: getTodayDbDate()
       };
 
       const { data: insertedTreatment, error: treatInsErr } = await supabase
@@ -5616,7 +5508,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
           doctor: appt.doctor,
           stage: "Completed",
           notes: consultNotes,
-          nextVisit: "10 Sep 2026",
+          nextVisit: "—",
           prescription: consultPrescription || "None",
           tooth: insertedTreatment.tooth_number || undefined,
           cost: Number(insertedTreatment.cost) || undefined
@@ -5631,7 +5523,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         doctor: appt.doctor,
         stage: "Completed",
         notes: consultNotes,
-        nextVisit: "10 Sep 2026",
+        nextVisit: "—",
         prescription: consultPrescription || "None"
       };
       setTreatments(prev => [newTreatmentLog, ...prev]);
@@ -5647,7 +5539,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
             prescriptions: updatedPrescriptions,
             files: updatedFiles,
             notes: updatedNotes,
-            visit: "12 Aug 2026"
+            visit: getTodayUiDate()
           };
         }
         return p;
@@ -5677,7 +5569,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       total: tot,
       paidAmount: 0,
       status: "Pending",
-      paymentDate: "12 Aug 2026",
+      paymentDate: "",
       paymentLogs: []
     };
 
@@ -5700,7 +5592,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     const finalInvoiceTotal = calculateInvoiceTotal();
 
     const paymentLogs = [...selectedInvoiceForPayment.paymentLogs];
-    const logDate = "12 Aug 2026";
+    const logDate = getTodayUiDate();
     if (paymentCollectAmt > 0) {
       paymentLogs.push({ method: paymentMethod, amount: paymentCollectAmt, date: logDate });
     }
@@ -5762,7 +5654,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
           patient_id: patDbUuid || null,
           amount: collectedTotal,
           payment_method: normPayMethod,
-          payment_date: new Date().toISOString().split("T")[0],
+          payment_date: getTodayDbDate(),
           notes: `Collected payment via ${paymentMethod}`
         });
     }
@@ -5946,7 +5838,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         age: newPatAge,
         gender: newPatGender,
         address: newPatAddress || "Bengaluru",
-        visit: "12 Aug 2026",
+        visit: getTodayUiDate(),
         medical_notes: newPatAllergies || "None",
         balance: "₹0",
         status: "Active",
@@ -5969,7 +5861,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       age: insertedPat.age,
       gender: insertedPat.gender,
       address: insertedPat.address || "Bengaluru",
-      visit: insertedPat.visit || "12 Aug 2026",
+      visit: getTodayUiDate(),
       medicalNotes: insertedPat.medical_notes || "None",
       balance: insertedPat.balance || "₹0",
       status: insertedPat.status || "Active",
@@ -5991,8 +5883,8 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       .insert({
         patient_id: insertedPat.id,
         doctor_id: doctorId,
-        appointment_date: new Date().toISOString().split("T")[0],
-        time_slot: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
+        appointment_date: getTodayDbDate(),
+        time_slot: getCurrentTime(),
         procedure_name: "Consultation",
         status: "Waiting",
         queue_token: tokenStr,
@@ -6014,7 +5906,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       patientName: insertedPat.name,
       doctor: docRecord ? docRecord.name : "Dr. Sharma",
       treatment: dbAppt.procedure_name || "Consultation",
-      time: dbAppt.time_slot || "12:00 PM",
+      time: dbAppt.time_slot || getCurrentTime(),
       date: convertToUiDate(dbAppt.appointment_date || ""),
       status: "Waiting",
       notes: dbAppt.notes || "Walk-in patient check-in.",
@@ -6291,7 +6183,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
           age: parsedAge,
           gender: patientData.gender,
           address: patientData.address || "Bengaluru",
-          visit: "12 Aug 2026",
+          visit: null,
           medical_notes: patientData.medicalNotes || "None",
           balance: "₹0",
           status: "Active",
@@ -6325,7 +6217,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         age: insertedPat.age,
         gender: insertedPat.gender,
         address: insertedPat.address || "Bengaluru",
-        visit: insertedPat.visit || "12 Aug 2026",
+        visit: insertedPat.visit || "—",
         medicalNotes: insertedPat.medical_notes || "None",
         balance: insertedPat.balance || "₹0",
         status: insertedPat.status || "Active",
@@ -6781,7 +6673,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         total: tot,
         paidAmount: 0,
         status: "Pending",
-        paymentDate: "12 Aug 2026",
+        paymentDate: "",
         paymentLogs: []
       };
 
@@ -6827,7 +6719,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
           total: tot,
           paidAmount: 0,
           status: "Pending",
-          paymentDate: "12 Aug 2026",
+          paymentDate: "",
           paymentLogs: []
         };
         setInvoices(prev => [newInvoice, ...prev]);
@@ -7081,24 +6973,28 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     // Today's appointments filtered list
     const todayApptsList = appointments.filter(a => a.date === activeDashboardDate && a.status !== "Cancelled");
 
-    // 15-Day Performance Tracker Data
-    const performanceData = [
-      { date: "29 Jul", fullDate: "Jul 29, 2026", consultations: 12, appointments: 8, newPatients: 2 },
-      { date: "30 Jul", fullDate: "Jul 30, 2026", consultations: 15, appointments: 10, newPatients: 3 },
-      { date: "31 Jul", fullDate: "Jul 31, 2026", consultations: 18, appointments: 12, newPatients: 4 },
-      { date: "1 Aug", fullDate: "Aug 1, 2026", consultations: 14, appointments: 11, newPatients: 3 },
-      { date: "2 Aug", fullDate: "Aug 2, 2026", consultations: 8, appointments: 6, newPatients: 1 },
-      { date: "3 Aug", fullDate: "Aug 3, 2026", consultations: 10, appointments: 8, newPatients: 2 },
-      { date: "4 Aug", fullDate: "Aug 4, 2026", consultations: 16, appointments: 11, newPatients: 4 },
-      { date: "5 Aug", fullDate: "Aug 5, 2026", consultations: 20, appointments: 14, newPatients: 5 },
-      { date: "6 Aug", fullDate: "Aug 6, 2026", consultations: 15, appointments: 12, newPatients: 3 },
-      { date: "7 Aug", fullDate: "Aug 7, 2026", consultations: 12, appointments: 9, newPatients: 2 },
-      { date: "8 Aug", fullDate: "Aug 8, 2026", consultations: 9, appointments: 7, newPatients: 1 },
-      { date: "9 Aug", fullDate: "Aug 9, 2026", consultations: 14, appointments: 10, newPatients: 3 },
-      { date: "10 Aug", fullDate: "Aug 10, 2026", consultations: 18, appointments: 13, newPatients: 4 },
-      { date: "11 Aug", fullDate: "Aug 11, 2026", consultations: 22, appointments: 16, newPatients: 6 },
-      { date: "12 Aug", fullDate: "Aug 12, 2026", consultations: 19, appointments: 14, newPatients: 5 }
-    ];
+    // 15-Day Performance Tracker Data (calculated dynamically from current date in Asia/Kolkata)
+    const performanceData = Array.from({ length: 15 }, (_, idx) => {
+      const dayOffset = 14 - idx; // 14 days ago through 0 (today)
+      const nowKolkata = getNowInKolkata();
+      const targetDate = new Date(nowKolkata.getFullYear(), nowKolkata.getMonth(), nowKolkata.getDate() - dayOffset);
+      const shortDay = formatDate(targetDate, "D MMM");
+      const fullDay = formatDate(targetDate, "MMM D, YYYY");
+      const targetDbDate = convertToDbDate(formatDate(targetDate, "DD MMM YYYY"));
+
+      const dayAppts = appointments.filter(a => convertToDbDate(a.date) === targetDbDate && a.status !== "Cancelled");
+      const apptCount = dayAppts.length;
+      const consultCount = dayAppts.filter(a => a.status === "Completed" || a.treatment?.toLowerCase().includes("consult")).length;
+      const newPatCount = patients.filter(p => p.createdAt && convertToDbDate(p.createdAt) === targetDbDate).length;
+
+      return {
+        date: shortDay,
+        fullDate: fullDay,
+        consultations: consultCount,
+        appointments: apptCount,
+        newPatients: newPatCount
+      };
+    });
 
     const consultationsPoints = performanceData.map((d, i) => ({ x: 40 + i * 67.14, y: 210 - d.consultations * 7.6 }));
     const appointmentsPoints = performanceData.map((d, i) => ({ x: 40 + i * 67.14, y: 210 - d.appointments * 7.6 }));
@@ -7173,7 +7069,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         total: 500,
         paidAmount: 0,
         status: "Pending",
-        paymentDate: "12 Aug 2026",
+        paymentDate: "",
         paymentLogs: []
       };
       setInvoices(prev => [newInvoice, ...prev]);
@@ -9212,7 +9108,7 @@ ${clinicName}`;
         // Synchronize with Treatments History Log
         const doctorObj = doctors.find(d => d.name === chartDoctor);
         const treatCostVal = Number(chartCost) || 0;
-        const treatDateVal = chartDate || new Date().toISOString().split("T")[0];
+        const treatDateVal = chartDate || getTodayDbDate();
 
         const dbInsertRows = targetTeeth.map(tIdx => {
           const toothObj = ALL_TEETH.find(t => t.index === tIdx);
@@ -9432,7 +9328,7 @@ ${clinicName}`;
                         medicalHistoryOthers={editMedicalHistoryOthers}
                         currentMedications={editCurrentMedications}
                         refDoctor={editRefDoctor}
-                        dateStr={patientItem.visit || patientItem.firstVisit}
+                        dateStr={(patientItem.visit && patientItem.visit !== "—") ? patientItem.visit : getTodayUiDate()}
                       />
                     </div>
                   </div>
@@ -9446,7 +9342,7 @@ ${clinicName}`;
                     </div>
                     <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                       <span className="text-slate-400 font-medium">Date: </span>
-                      <strong>{patientItem.visit || patientItem.firstVisit || new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</strong>
+                      <strong>{(patientItem.visit && patientItem.visit !== "—") ? patientItem.visit : (patientItem.createdAt ? convertToUiDate(patientItem.createdAt) : getTodayUiDate())}</strong>
                     </div>
                   </div>
 
@@ -10251,7 +10147,7 @@ ${clinicName}`;
                     medicalHistoryOthers={editMedicalHistoryOthers}
                     currentMedications={editCurrentMedications}
                     refDoctor={editRefDoctor}
-                    dateStr={patientItem.visit || patientItem.firstVisit}
+                    dateStr={(patientItem.visit && patientItem.visit !== "—") ? patientItem.visit : getTodayUiDate()}
                   />
                 </div>
               </div>
@@ -10292,7 +10188,7 @@ ${clinicName}`;
                         {treatments.filter(t => t.patient === patientItem.name).length > 0 ? (
                           treatments.filter(t => t.patient === patientItem.name).map((tr) => (
                             <tr key={tr.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-900/40">
-                              <td className="py-3 text-slate-500 font-normal">{tr.date || "12 Aug 2026"}</td>
+                              <td className="py-3 text-slate-500 font-normal">{tr.date || "—"}</td>
                               <td className="py-3 font-bold text-slate-900 dark:text-white">{tr.name}</td>
                               <td className="py-3 text-slate-600 dark:text-slate-400 font-medium">{tr.tooth ? `#${tr.tooth}` : "-"}</td>
                               <td className="py-3 text-slate-600 dark:text-slate-400 font-medium">{tr.doctor || "Doctor"}</td>
@@ -10938,7 +10834,7 @@ ${clinicName}`;
                                           patient_id: patUuid || null,
                                           amount: unpaidPortion,
                                           payment_method: "Cash",
-                                          payment_date: new Date().toISOString().split("T")[0],
+                                          payment_date: getTodayDbDate(),
                                           notes: "Marked Paid full settlement"
                                         });
                                       }
@@ -10947,7 +10843,7 @@ ${clinicName}`;
                                     // 3. Update legacy billing table
                                     await supabase
                                       .from("billing")
-                                      .update({ status: "Paid", paid_amount: inv.total, payment_date: new Date().toISOString().split("T")[0] })
+                                      .update({ status: "Paid", paid_amount: inv.total, payment_date: getTodayDbDate() })
                                       .eq("invoice_id", inv.id);
 
                                     // 4. Update patient balance
@@ -11419,7 +11315,7 @@ ${clinicName}`;
                                   isOpen: true,
                                   patient: patientItem,
                                   medicines: [pr],
-                                  dateStr: patientItem.visit || patientItem.firstVisit || new Date().toISOString().split("T")[0],
+                                  dateStr: (patientItem.visit && patientItem.visit !== "—") ? patientItem.visit : getTodayUiDate(),
                                   doctorName: prescDoctor || "Dr. Suvarna Raju.P"
                                 });
                               }}
@@ -11435,7 +11331,7 @@ ${clinicName}`;
                                 handleDownloadPrescriptionPDF({
                                   patient: patientItem,
                                   medicines: [pr],
-                                  dateStr: patientItem.visit || patientItem.firstVisit || new Date().toISOString().split("T")[0],
+                                  dateStr: (patientItem.visit && patientItem.visit !== "—") ? patientItem.visit : getTodayUiDate(),
                                   doctorName: prescDoctor || "Dr. Suvarna Raju.P"
                                 });
                               }}
@@ -11469,7 +11365,7 @@ ${clinicName}`;
                     <OfficialSameekshaPrescription
                       patient={patientItem}
                       medicines={prescriptionPreviewModal?.medicines || prescMeds}
-                      dateStr={prescriptionPreviewModal?.dateStr || prescDate || patientItem.visit || patientItem.firstVisit}
+                      dateStr={prescriptionPreviewModal?.dateStr || (prescDate ? convertToUiDate(prescDate) : (patientItem.visit && patientItem.visit !== "—" ? patientItem.visit : getTodayUiDate()))}
                       diagnosis={prescriptionPreviewModal?.diagnosis || prescDiagnosis}
                       advice={prescriptionPreviewModal?.advice || prescAdvice}
                       doctorName={prescriptionPreviewModal?.doctorName || prescDoctor || "Dr. Suvarna Raju.P"}
@@ -11659,7 +11555,7 @@ ${clinicName}`;
                         const isPdf = (file.mime_type?.includes("pdf") || file.name?.toLowerCase().endsWith(".pdf") || file.type?.toLowerCase().includes("pdf"));
                         const isImg = (file.mime_type?.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(file.name));
                         const displayCategory = file.category || file.type || "Document";
-                        const uploadDateFormatted = file.created_at ? new Date(file.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Saved";
+                        const uploadDateFormatted = file.created_at ? formatDate(file.created_at, "D MMM YYYY") : "Saved";
 
                         return (
                           <div
@@ -11791,8 +11687,8 @@ ${clinicName}`;
                   {(() => {
                     const activePat = patients.find(p => p.id === selectedPatientId);
                     const docName = prescDoctor || (doctors[0]?.name || "Dr. Deepa Kodali");
-                    const todayDate = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-                    const timeStr = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+                    const todayDate = getTodayUiDate();
+                    const timeStr = getCurrentTime();
 
                     return (
                       <div className="bg-slate-50 dark:bg-slate-900/60 rounded-xl p-3.5 border border-slate-100 dark:border-slate-800/80 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 text-xs">
@@ -12237,7 +12133,7 @@ ${clinicName}`;
 
                         <div>
                           <Label>Link Appointment Date (Optional)</Label>
-                          <Input value={editMediaAppointment} onChange={e => setEditMediaAppointment(e.target.value)} placeholder="e.g. 12 Aug 2026" />
+                          <Input value={editMediaAppointment} onChange={e => setEditMediaAppointment(e.target.value)} placeholder={`e.g. ${getTodayUiDate()}`} />
                         </div>
 
                         <div>
@@ -12496,9 +12392,17 @@ ${clinicName}`;
     const patName = tr.patient || "Patient";
     const patId = pat?.id || "DS-1001";
     const cost = tr.cost || 0;
-    const paid = tr.stage === "Completed" ? cost : Math.round(cost * 0.6);
-    const remaining = cost - paid;
-    const invId = `INV-${tr.id.replace(/\D/g, '') || '1001'}`;
+    const matchingInvoice = invoices.find(inv =>
+      (inv.patientId === patId || inv.patientName === patName) &&
+      (inv.treatment.includes(tr.name) || inv.id.includes(tr.id.replace(/\D/g, '')))
+    );
+    const paid = matchingInvoice ? matchingInvoice.paidAmount : (tr.stage === "Completed" ? cost : Math.round(cost * 0.6));
+    const remaining = Math.max(0, cost - paid);
+    const invId = matchingInvoice ? matchingInvoice.id : `INV-${tr.id.replace(/\D/g, '') || '1001'}`;
+    const lastPaymentLog = matchingInvoice?.paymentLogs?.[matchingInvoice.paymentLogs.length - 1];
+    const lastPaymentText = lastPaymentLog
+      ? `₹${lastPaymentLog.amount.toLocaleString()} on ${lastPaymentLog.date} (${lastPaymentLog.method})`
+      : (matchingInvoice?.paymentDate ? `Paid on ${matchingInvoice.paymentDate}` : (paid > 0 ? `₹${paid.toLocaleString()} recorded` : "No payments yet"));
 
     const timelineNodes = getPatientVisitsList(tr, treatments, appointments);
     const totalVisits = timelineNodes.length;
@@ -12678,7 +12582,7 @@ ${clinicName}`;
                     setApptDoctor(tr.doctor);
                   }
                   setApptTreatment(tr.name);
-                  setApptDate(new Date().toISOString().split("T")[0]);
+                  setApptDate(getTodayDbDate());
                   setApptTime("10:00 AM");
                   setActiveModal("addAppointment");
                 }}
@@ -12713,7 +12617,7 @@ ${clinicName}`;
                 <div className="pt-3 space-y-2.5">
                   <div className="flex justify-between items-center text-[12px]">
                     <span className="font-medium text-slate-400 dark:text-slate-500">Last Payment</span>
-                    <span className="text-[14px] font-medium text-slate-700 dark:text-slate-300">₹2,500 on 12 Aug 2026 (Cash)</span>
+                    <span className="text-[14px] font-medium text-slate-700 dark:text-slate-300">{lastPaymentText}</span>
                   </div>
                   <div className="flex justify-between items-center text-[12px]">
                     <span className="font-medium text-slate-400 dark:text-slate-500">Payment Status</span>
@@ -12749,7 +12653,7 @@ ${clinicName}`;
                     total: cost,
                     paidAmount: paid,
                     status: remaining === 0 ? "Paid" : "Partially Paid",
-                    paymentDate: "12 Aug 2026",
+                    paymentDate: remaining === 0 ? getTodayUiDate() : "",
                     paymentLogs: []
                   };
                   setSelectedInvoiceForPayment(inv);
@@ -13343,8 +13247,8 @@ ${clinicName}`;
                         showToast("End Date cannot be earlier than Start Date.", "error");
                         return;
                       }
-                      const startFmt = new Date(customStartDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-                      const endFmt = new Date(customEndDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                      const startFmt = formatDate(customStartDate);
+                      const endFmt = formatDate(customEndDate);
                       setAppliedCustomLabel(`${startFmt} – ${endFmt}`);
                       setReportsFilter("Custom");
                       setCustomRangeModalOpen(false);
@@ -17696,7 +17600,7 @@ ${clinicName}`;
                     value={editInvoicePaymentDate}
                     onChange={(e) => setEditInvoicePaymentDate(e.target.value)}
                     className="text-[13px]"
-                    placeholder="e.g. 12 Aug 2026"
+                    placeholder={`e.g. ${getTodayUiDate()}`}
                   />
                 </div>
               </div>

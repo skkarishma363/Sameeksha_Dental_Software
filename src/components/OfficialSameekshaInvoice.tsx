@@ -54,24 +54,8 @@ export interface OfficialSameekshaInvoiceProps {
   className?: string;
 }
 
-/**
- * Formats date into standard DD/MM/YYYY for display on the official printed invoice.
- */
-export function formatInvoiceDate(rawDate?: string): string {
-  if (!rawDate || !rawDate.trim()) {
-    return new Date().toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    });
-  }
-  const clean = rawDate.includes("T") ? rawDate.split("T")[0] : rawDate.split(" ")[0];
-  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
-    const [yyyy, mm, dd] = clean.split("-");
-    return `${dd}/${mm}/${yyyy}`;
-  }
-  return clean;
-}
+import { formatInvoiceDate } from "@/lib/date-utils";
+export { formatInvoiceDate };
 
 /**
  * Formats a numeric currency value into the standard Indian Rupee notation

@@ -2,6 +2,7 @@
 
 import React from "react";
 import { getAssetPath } from "@/lib/getAssetPath";
+import { formatInvoiceDate } from "@/lib/date-utils";
 
 export interface OfficialSameekshaCaseSheetProps {
   patient: {
@@ -102,15 +103,7 @@ export const OfficialSameekshaCaseSheet: React.FC<OfficialSameekshaCaseSheetProp
   const phoneDisplay = patient.phone || "";
 
   // Date: 22px bold
-  const finalDate =
-    dateStr ||
-    patient.visit ||
-    patient.firstVisit ||
-    new Date().toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    });
+  const finalDate = formatInvoiceDate(dateStr || patient.visit || patient.firstVisit || null);
 
   // OP Number: Extract numeric digits from patient ID (e.g. "DS-1002" -> "1002")
   const rawId = String(patient.id || patient.patient_id || "");

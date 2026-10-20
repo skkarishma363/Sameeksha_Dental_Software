@@ -1,5 +1,6 @@
 import jsPDF from "jspdf";
 import { getAssetPath } from "./getAssetPath";
+import { formatInvoiceDate } from "./date-utils";
 import { parsePrescriptionItem, PrescribedMedicineItem } from "@/components/OfficialSameekshaPrescription";
 
 export interface PrescriptionPdfData {
@@ -113,14 +114,7 @@ export async function downloadSameekshaPrescriptionPDF(
         }
 
         // 4. Date
-        const finalDate =
-          data.dateStr ||
-          data.patient.visit ||
-          new Date().toLocaleDateString("en-GB", {
-            day: "2-digit",
-            month: "2-digit",
-            year: "numeric",
-          });
+        const finalDate = formatInvoiceDate(data.dateStr || data.patient.visit || null);
 
         if (finalDate) {
           ctx.font = "bold 24px 'Segoe UI', Arial, -apple-system, sans-serif";
