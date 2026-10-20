@@ -279,10 +279,20 @@ interface Doctor {
   id?: string;
   name: string;
   speciality: string;
-  status: "Available" | "In Consultation" | "On Break" | "Finished Today";
+  status?: "Available" | "In Consultation" | "On Break" | "Finished Today" | string | null;
   avatar?: string;
   phone?: string;
 }
+
+export const PREDEFINED_SPECIALTIES = [
+  "General Dentist",
+  "Endodontist",
+  "Orthodontist",
+  "Periodontist",
+  "Pedodontist",
+  "Prosthodontist",
+  "Oral Surgeon"
+];
 
 interface Staff {
   id: string;
@@ -1359,7 +1369,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         id: d.id,
         name: d.name,
         speciality: d.specialty || "",
-        status: (d.status === "Available" || d.status === "In Consultation" || d.status === "On Break" || d.status === "Finished Today") ? d.status : "Available",
+        status: d.status || "",
         phone: d.phone || ""
       }));
       setDoctors(mappedDoctors);
@@ -3200,8 +3210,12 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
   // Form states for adding/editing doctor
   const [docFormName, setDocFormName] = useState("");
   const [docFormSpeciality, setDocFormSpeciality] = useState("General Dentist");
+  const [docFormCustomSpeciality, setDocFormCustomSpeciality] = useState("");
   const [docFormPhone, setDocFormPhone] = useState("+91 ");
-  const [docFormStatus, setDocFormStatus] = useState<"Available" | "In Consultation" | "On Break" | "Finished Today">("Available");
+  const [docFormStatus, setDocFormStatus] = useState<string>("");
+  const [docFormNameError, setDocFormNameError] = useState("");
+  const [docFormSpecialityError, setDocFormSpecialityError] = useState("");
+  const [isSavingDoctor, setIsSavingDoctor] = useState(false);
 
   // Form states for adding/editing staff
   const [staffFormName, setStaffFormName] = useState("");
@@ -14210,17 +14224,30 @@ ${clinicName}`;
       setEditingDoctor(null);
       setDocFormName("");
       setDocFormSpeciality("General Dentist");
+      setDocFormCustomSpeciality("");
       setDocFormPhone("+91 ");
-      setDocFormStatus("Available");
+      setDocFormStatus("");
+      setDocFormNameError("");
+      setDocFormSpecialityError("");
+      setIsSavingDoctor(false);
       setDoctorModalOpen(true);
     };
 
     const handleOpenEditDoctor = (doc: Doctor) => {
       setEditingDoctor(doc);
       setDocFormName(doc.name);
-      setDocFormSpeciality(doc.speciality);
+      if (PREDEFINED_SPECIALTIES.includes(doc.speciality)) {
+        setDocFormSpeciality(doc.speciality);
+        setDocFormCustomSpeciality("");
+      } else {
+        setDocFormSpeciality("Custom Specialty");
+        setDocFormCustomSpeciality(doc.speciality || "");
+      }
       setDocFormPhone(formatPhoneInput(doc.phone || ""));
-      setDocFormStatus(doc.status);
+      setDocFormStatus(doc.status || "");
+      setDocFormNameError("");
+      setDocFormSpecialityError("");
+      setIsSavingDoctor(false);
       setDoctorModalOpen(true);
     };
 
@@ -14275,84 +14302,152 @@ ${clinicName}`;
 
     const handleSaveDoctor = async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!docFormName.trim()) return;
-      if (docFormPhone && !validate10DigitPhone(docFormPhone)) {
+
+      // Reset inline validation errors
+      setDocFormNameError("");
+      setDocFormSpecialityError("");
+
+      const trimmedName = docFormName.trim();
+      if (!trimmedName) {
+        setDocFormNameError("Doctor name is required.");
+        showToast("Please enter a doctor name.", "error");
+        return;
+      }
+
+      // Specialty validation: If "Custom Specialty", require trimmed value and never save literal "Custom Specialty"
+      let finalSpecialty = docFormSpeciality;
+      if (docFormSpeciality === "Custom Specialty") {
+        const trimmedCustom = docFormCustomSpeciality.trim();
+        if (!trimmedCustom) {
+          setDocFormSpecialityError("Please enter a custom specialty name.");
+          showToast("Please enter a custom specialty name.", "error");
+          return;
+        }
+        finalSpecialty = trimmedCustom;
+      }
+
+      const rawPhone = docFormPhone.trim();
+      if (rawPhone && rawPhone !== "+91" && !validate10DigitPhone(rawPhone)) {
         showToast("Doctor phone number must contain exactly 10 digits after +91.", "error");
         return;
       }
 
-      const formattedName = docFormName.startsWith("Dr.") ? docFormName.trim() : `Dr. ${docFormName.trim()}`;
+      const formattedName = trimmedName.startsWith("Dr.") ? trimmedName : `Dr. ${trimmedName}`;
+      const statusToSave = docFormStatus && docFormStatus.trim() ? docFormStatus.trim() : null;
 
-      if (editingDoctor) {
-        let updateId = editingDoctor.id;
-        if (!updateId) {
-          const match = doctors.find(d => d.name === editingDoctor.name);
-          if (match) updateId = match.id;
-        }
+      setIsSavingDoctor(true);
 
-        let query = supabase.from("doctors").update({
-          name: formattedName,
-          specialty: docFormSpeciality,
-          phone: docFormPhone.trim() || "+91 98765 43210",
-          status: docFormStatus
-        });
+      try {
+        if (editingDoctor) {
+          let updateId = editingDoctor.id;
+          if (!updateId) {
+            const match = doctors.find(d => d.name === editingDoctor.name);
+            if (match) updateId = match.id;
+          }
 
-        if (updateId) {
-          query = query.eq("id", updateId);
-        } else {
-          query = query.eq("name", editingDoctor.name);
-        }
-
-        const { data, error } = await query.select().maybeSingle();
-        if (error) {
-          console.error("Failed to update doctor in database:", error.message);
-          showToast(error.message || "Failed to update doctor details in database.", "error");
-          return;
-        }
-
-        setDoctors(prev =>
-          prev.map(d =>
-            (updateId && d.id === updateId) || d.name === editingDoctor.name
-              ? {
-                  id: data?.id || d.id,
-                  name: data?.name || formattedName,
-                  speciality: data?.specialty || docFormSpeciality,
-                  phone: data?.phone || docFormPhone.trim(),
-                  status: data?.status || docFormStatus
-                }
-              : d
-          )
-        );
-        showToast("Doctor details updated successfully.", "success");
-      } else {
-        const { data, error } = await supabase
-          .from("doctors")
-          .insert({
+          const updatePayload: any = {
             name: formattedName,
-            specialty: docFormSpeciality,
-            phone: docFormPhone.trim() || "+91 98765 43210",
-            status: docFormStatus
-          })
-          .select()
-          .maybeSingle();
+            specialty: finalSpecialty,
+            phone: (rawPhone && rawPhone !== "+91") ? rawPhone : (editingDoctor.phone || "+91 98765 43210"),
+            status: statusToSave
+          };
 
-        if (error || !data) {
-          console.error("Failed to register doctor in database:", error?.message);
-          showToast(error?.message || "Failed to register doctor in database.", "error");
-          return;
+          let query = supabase.from("doctors").update(updatePayload);
+          if (updateId) {
+            query = query.eq("id", updateId);
+          } else {
+            query = query.eq("name", editingDoctor.name);
+          }
+
+          let { data, error } = await query.select().maybeSingle();
+
+          // Handle database constraint safely if column is NOT NULL and user left status empty
+          if (error && (error.code === "23502" || error.message?.includes("violates not-null"))) {
+            console.warn("doctors.status has NOT NULL constraint; omitting status from update to preserve existing status.");
+            delete updatePayload.status;
+            let retryQuery = supabase.from("doctors").update(updatePayload);
+            if (updateId) {
+              retryQuery = retryQuery.eq("id", updateId);
+            } else {
+              retryQuery = retryQuery.eq("name", editingDoctor.name);
+            }
+            const retry = await retryQuery.select().maybeSingle();
+            data = retry.data;
+            error = retry.error;
+          }
+
+          if (error || !data) {
+            console.error("Failed to update doctor in database:", error?.message);
+            showToast(error?.message || "Failed to update doctor details in database.", "error");
+            setIsSavingDoctor(false);
+            return;
+          }
+
+          setDoctors(prev =>
+            prev.map(d =>
+              (updateId && d.id === updateId) || d.name === editingDoctor.name
+                ? {
+                    id: data?.id || d.id,
+                    name: data?.name || formattedName,
+                    speciality: data?.specialty || finalSpecialty,
+                    phone: data?.phone || rawPhone,
+                    status: data?.status || ""
+                  }
+                : d
+            )
+          );
+          showToast("Doctor details updated successfully.", "success");
+        } else {
+          const insertPayload: any = {
+            name: formattedName,
+            specialty: finalSpecialty,
+            phone: (rawPhone && rawPhone !== "+91") ? rawPhone : "+91 98765 43210",
+            status: statusToSave
+          };
+
+          let { data, error } = await supabase
+            .from("doctors")
+            .insert(insertPayload)
+            .select()
+            .maybeSingle();
+
+          // If database column has a NOT NULL constraint and rejects null, omit status to let DB default handle safely
+          if (error && (error.code === "23502" || error.message?.includes("violates not-null"))) {
+            console.warn("doctors.status has NOT NULL constraint; omitting status to use column default.");
+            delete insertPayload.status;
+            const retry = await supabase
+              .from("doctors")
+              .insert(insertPayload)
+              .select()
+              .maybeSingle();
+            data = retry.data;
+            error = retry.error;
+          }
+
+          if (error || !data) {
+            console.error("Failed to register doctor in database:", error?.message);
+            showToast(error?.message || "Failed to register doctor in database.", "error");
+            setIsSavingDoctor(false);
+            return;
+          }
+
+          const newDoc: Doctor = {
+            id: data.id,
+            name: data.name,
+            speciality: data.specialty || finalSpecialty,
+            phone: data.phone || "+91 98765 43210",
+            status: data.status || ""
+          };
+          setDoctors(prev => [...prev, newDoc]);
+          showToast("New doctor registered successfully.", "success");
         }
-
-        const newDoc: Doctor = {
-          id: data.id,
-          name: data.name,
-          speciality: data.specialty || docFormSpeciality,
-          phone: data.phone || "+91 98765 43210",
-          status: data.status || docFormStatus
-        };
-        setDoctors(prev => [...prev, newDoc]);
-        showToast("New doctor registered successfully.", "success");
+        setDoctorModalOpen(false);
+      } catch (err: any) {
+        console.error("Doctor save error:", err);
+        showToast(err?.message || "An unexpected error occurred while saving doctor.", "error");
+      } finally {
+        setIsSavingDoctor(false);
       }
-      setDoctorModalOpen(false);
     };
 
     const handleDeleteDoctor = async () => {
@@ -14735,9 +14830,15 @@ ${clinicName}`;
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="text-[14px] font-semibold text-slate-900 dark:text-white">{doc.name}</span>
-                            <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 dark:bg-emerald-955/40 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/40 rounded-full font-medium text-[11px]">
-                              {doc.status}
-                            </span>
+                            {doc.status ? (
+                              <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 dark:bg-emerald-955/40 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/40 rounded-full font-medium text-[11px]">
+                                {doc.status}
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 bg-slate-100 text-slate-500 dark:bg-slate-800/80 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-full font-normal text-[11px]">
+                                No Status Set
+                              </span>
+                            )}
                           </div>
                           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-slate-500 dark:text-slate-400 mt-1">
                             <span>Specialty: <strong className="font-medium text-slate-700 dark:text-slate-300">{doc.speciality}</strong></span>
@@ -15114,57 +15215,106 @@ ${clinicName}`;
                 <h3 className="text-[16px] font-bold text-slate-900 dark:text-white">
                   {editingDoctor ? "Edit Doctor Information" : "Add New Doctor"}
                 </h3>
-                <button onClick={() => setDoctorModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+                <button
+                  type="button"
+                  onClick={() => !isSavingDoctor && setDoctorModalOpen(false)}
+                  disabled={isSavingDoctor}
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 disabled:opacity-50 cursor-pointer"
+                >
                   <X className="h-5 w-5" />
                 </button>
               </div>
 
               <form onSubmit={handleSaveDoctor} className="space-y-4">
+                {/* Doctor Name */}
                 <div className="space-y-1.5">
-                  <Label className="text-[13px] font-medium">Doctor Name</Label>
+                  <Label className="text-[13px] font-medium flex items-center justify-between">
+                    <span>Doctor Name <span className="text-red-500">*</span></span>
+                  </Label>
                   <Input
-                    required
                     placeholder="e.g. Dr. Ramesh Kumar"
                     value={docFormName}
-                    onChange={(e) => setDocFormName(e.target.value)}
-                    className="h-10 text-[13px]"
+                    onChange={(e) => {
+                      setDocFormName(e.target.value);
+                      if (docFormNameError) setDocFormNameError("");
+                    }}
+                    disabled={isSavingDoctor}
+                    className={`h-10 text-[13px] ${docFormNameError ? "border-red-500 focus-visible:ring-red-500" : ""}`}
                   />
+                  {docFormNameError && (
+                    <p className="text-[11px] text-red-500 font-medium">{docFormNameError}</p>
+                  )}
                 </div>
 
+                {/* Specialty Dropdown */}
                 <div className="space-y-1.5">
-                  <Label className="text-[13px] font-medium">Specialty</Label>
+                  <Label className="text-[13px] font-medium flex items-center justify-between">
+                    <span>Specialty <span className="text-red-500">*</span></span>
+                  </Label>
                   <select
                     value={docFormSpeciality}
-                    onChange={(e) => setDocFormSpeciality(e.target.value)}
-                    className="w-full h-10 px-3 text-[13px] rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                    onChange={(e) => {
+                      setDocFormSpeciality(e.target.value);
+                      if (docFormSpecialityError) setDocFormSpecialityError("");
+                    }}
+                    disabled={isSavingDoctor}
+                    className="w-full h-10 px-3 text-[13px] rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="General Dentist">General Dentist</option>
-                    <option value="Endodontist">Endodontist</option>
-                    <option value="Orthodontist">Orthodontist</option>
-                    <option value="Periodontist">Periodontist</option>
-                    <option value="Pedodontist">Pedodontist</option>
-                    <option value="Prosthodontist">Prosthodontist</option>
-                    <option value="Oral Surgeon">Oral Surgeon</option>
+                    {PREDEFINED_SPECIALTIES.map((spec) => (
+                      <option key={spec} value={spec}>{spec}</option>
+                    ))}
+                    <option value="Custom Specialty">Custom Specialty</option>
                   </select>
                 </div>
 
+                {/* Custom Specialty Text Input (Visible only when 'Custom Specialty' is selected) */}
+                {docFormSpeciality === "Custom Specialty" && (
+                  <div className="space-y-1.5 animate-fadeIn">
+                    <Label className="text-[13px] font-medium flex items-center justify-between">
+                      <span>Enter Custom Specialty <span className="text-red-500">*</span></span>
+                    </Label>
+                    <Input
+                      placeholder="e.g. Oral and Maxillofacial Surgeon"
+                      value={docFormCustomSpeciality}
+                      onChange={(e) => {
+                        setDocFormCustomSpeciality(e.target.value);
+                        if (docFormSpecialityError) setDocFormSpecialityError("");
+                      }}
+                      disabled={isSavingDoctor}
+                      className={`h-10 text-[13px] ${docFormSpecialityError ? "border-red-500 focus-visible:ring-red-500" : ""}`}
+                    />
+                    {docFormSpecialityError && (
+                      <p className="text-[11px] text-red-500 font-medium">{docFormSpecialityError}</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Contact Number (Optional) */}
                 <div className="space-y-1.5">
-                  <Label className="text-[13px] font-medium">Contact Number</Label>
+                  <Label className="text-[13px] font-medium flex items-center justify-between">
+                    <span>Contact Number <span className="text-slate-400 font-normal">(optional)</span></span>
+                  </Label>
                   <Input
                     placeholder="+91 98765 43210"
                     value={docFormPhone}
-                    onChange={(e) => setDocFormPhone(e.target.value)}
+                    onChange={(e) => setDocFormPhone(formatPhoneInput(e.target.value))}
+                    disabled={isSavingDoctor}
                     className="h-10 text-[13px]"
                   />
                 </div>
 
+                {/* Status Dropdown (Optional) */}
                 <div className="space-y-1.5">
-                  <Label className="text-[13px] font-medium">Status</Label>
+                  <Label className="text-[13px] font-medium flex items-center justify-between">
+                    <span>Status <span className="text-slate-400 font-normal">(optional)</span></span>
+                  </Label>
                   <select
                     value={docFormStatus}
-                    onChange={(e) => setDocFormStatus(e.target.value as any)}
-                    className="w-full h-10 px-3 text-[13px] rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                    onChange={(e) => setDocFormStatus(e.target.value)}
+                    disabled={isSavingDoctor}
+                    className="w-full h-10 px-3 text-[13px] rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
+                    <option value="">Select status (optional)</option>
                     <option value="Available">Available</option>
                     <option value="In Consultation">In Consultation</option>
                     <option value="On Break">On Break</option>
@@ -15172,12 +15322,24 @@ ${clinicName}`;
                   </select>
                 </div>
 
+                {/* Action Buttons */}
                 <div className="flex justify-end gap-3 pt-2">
-                  <Button type="button" variant="outline" onClick={() => setDoctorModalOpen(false)} className="h-10 px-4 text-xs">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setDoctorModalOpen(false)}
+                    disabled={isSavingDoctor}
+                    className="h-10 px-4 text-xs cursor-pointer"
+                  >
                     Cancel
                   </Button>
-                  <Button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white font-bold h-10 px-5 text-xs">
-                    {editingDoctor ? "Save Changes" : "Add Doctor"}
+                  <Button
+                    type="submit"
+                    disabled={isSavingDoctor}
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold h-10 px-5 text-xs flex items-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
+                  >
+                    {isSavingDoctor && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    {isSavingDoctor ? "Saving..." : (editingDoctor ? "Save Changes" : "Add Doctor")}
                   </Button>
                 </div>
               </form>
