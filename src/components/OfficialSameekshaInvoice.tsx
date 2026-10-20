@@ -74,12 +74,177 @@ export function formatInvoiceDate(rawDate?: string): string {
 }
 
 /**
+ * Formats a numeric currency value into the standard Indian Rupee notation
+ * matching the Sameeksha official reference format (e.g. "Rs. 1,000.00", "Rs. 66,133.00").
+ */
+export function formatInvoiceCurrency(amount: number): string {
+  const num = Number(amount) || 0;
+  return `Rs. ${num.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+/**
+ * Cleanly wraps text into lines fitting within a max character limit
+ * while keeping whole words intact.
+ */
+export function wrapInvoiceText(text: string, maxChars = 52): string[] {
+  const clean = (text || "").trim();
+  if (!clean || clean.length <= maxChars) return [clean || ""];
+  const words = clean.split(/\s+/);
+  const lines: string[] = [];
+  let current = "";
+  for (const w of words) {
+    if ((current + (current ? " " : "") + w).length <= maxChars) {
+      current = current + (current ? " " : "") + w;
+    } else {
+      if (current) lines.push(current);
+      current = w;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+export interface InvoiceRenderRow {
+  isSubItem: boolean;
+  prefix: string;
+  descriptionLines: string[];
+  amountStr: string;
+  y: number;
+}
+
+export interface InvoiceLayoutResult {
+  rows: InvoiceRenderRow[];
+  dividerY: number;
+  subtotalY: number;
+  discountY: number;
+  totalY: number;
+  paidY: number;
+  balanceY: number;
+  hasDiscount: boolean;
+  hasPayment: boolean;
+  isOverflow: boolean;
+  lineHeight: number;
+}
+
+/**
+ * Computes vertically arranged treatment rows, alignment coordinates,
+ * text wrapping, horizontal divider position, and prominent total matching
+ * the authentic Sameeksha reference invoice format.
+ */
+export function computeInvoiceLayout(
+  items: InvoiceLineItem[],
+  subtotal: number,
+  discountAmt: number,
+  total: number,
+  paidAmount: number,
+  balanceDue: number,
+  startY = 575
+): InvoiceLayoutResult {
+  // Comfortable vertical spacing based on line count
+  let lineHeight = 44;
+  if (items.length > 8) lineHeight = 34;
+  else if (items.length > 5) lineHeight = 38;
+
+  let currentY = startY;
+  let mainIndex = 1;
+  const rows: InvoiceRenderRow[] = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const rawDesc = (item.description || "Treatment / Consultation").trim();
+
+    // Check for sub-item patterns: "a. ", "b) ", "- ", "• " or flagged as subItem
+    const subMatch = rawDesc.match(/^([a-z][\.\)]|[-•*])\s*(.*)/i);
+    const isSub = Boolean(subMatch) || (item as any).isSubItem === true;
+
+    let prefix = "";
+    let cleanDesc = rawDesc;
+    if (subMatch) {
+      prefix = subMatch[1].endsWith(".") || subMatch[1].endsWith(")") ? subMatch[1] : `${subMatch[1]}.`;
+      cleanDesc = subMatch[2].trim();
+    } else if (isSub) {
+      prefix = "-";
+    } else {
+      prefix = `${mainIndex}.`;
+      mainIndex++;
+    }
+
+    // Display quantity in parentheses e.g. "GIC RESTORATIONS (3)" if qty > 1 and not already in description
+    const qty = Number(item.quantity) || 1;
+    if (qty > 1 && !/\(\s*\d+\s*\)/.test(cleanDesc) && !/\b\d+\s*x\b/i.test(cleanDesc) && !/\bx\s*\d+\b/i.test(cleanDesc)) {
+      cleanDesc = `${cleanDesc} (${qty})`;
+    }
+
+    const maxChars = isSub ? 46 : 52;
+    const lines = wrapInvoiceText(cleanDesc, maxChars);
+
+    // If an item has 0 amount and is immediately followed by a sub-item, treat as section header
+    const nextItem = items[i + 1];
+    const nextIsSub = nextItem && (/^[a-z][\.\)]\s+/i.test(nextItem.description) || (nextItem as any).isSubItem);
+    const isHeaderOnly = (item.amount === 0 || item.amount === undefined) && nextIsSub;
+    const amountStr = isHeaderOnly ? "" : formatInvoiceCurrency(item.amount);
+
+    rows.push({
+      isSubItem: isSub,
+      prefix,
+      descriptionLines: lines,
+      amountStr,
+      y: currentY,
+    });
+
+    currentY += lines.length * lineHeight;
+  }
+
+  const dividerY = currentY + 16;
+  const hasDiscount = discountAmt > 0;
+  const hasPayment = paidAmount > 0;
+
+  let subtotalY = 0;
+  let discountY = 0;
+  let totalY = 0;
+  let paidY = 0;
+  let balanceY = 0;
+
+  if (hasDiscount) {
+    subtotalY = dividerY + 30;
+    discountY = subtotalY + 24;
+    totalY = discountY + 34;
+  } else {
+    totalY = dividerY + 36;
+  }
+
+  if (hasPayment) {
+    paidY = totalY + 28;
+    balanceY = paidY + 24;
+  }
+
+  const bottomMostY = hasPayment ? balanceY : totalY;
+  const isOverflow = bottomMostY > 1315;
+
+  return {
+    rows,
+    dividerY,
+    subtotalY,
+    discountY,
+    totalY,
+    paidY,
+    balanceY,
+    hasDiscount,
+    hasPayment,
+    isOverflow,
+    lineHeight,
+  };
+}
+
+/**
  * Official Sameeksha Super Speciality Dental Hospital Invoice Component.
  *
- * Uses the exact supplied authentic invoice template as a fixed background
- * ('Sameeksha Dental Hospital Invoice Template(1).png') and overlays dynamic
- * database values at mathematical pixel coordinates matching the printed lines
- * and the treatments/charges area above the bottom horizontal border line.
+ * Uses the authentic Sameeksha invoice template background and overlays dynamic
+ * patient info and a clean vertically arranged treatment list with right-aligned
+ * amounts and a prominent Total matching the exact hospital reference layout.
  */
 export const OfficialSameekshaInvoice: React.FC<OfficialSameekshaInvoiceProps> = ({
   patient,
@@ -185,22 +350,16 @@ export const OfficialSameekshaInvoice: React.FC<OfficialSameekshaInvoiceProps> =
   const paidAmount = Number(invoice?.paidAmount) || (invoice?.status === "Paid" ? total : 0);
   const balanceDue = Math.max(0, total - paidAmount);
 
-  const paymentMode = invoice?.paymentLogs?.[0]?.method || (paidAmount > 0 ? "Cash" : "");
-
-  // Table coordinates
-  const tableStartY = 545;
-  const headerHeight = 36;
-  const rowStartY = tableStartY + headerHeight + 10;
-  const rowHeight = items.length > 7 ? 32 : 36;
-  const maxDisplayRows = 10;
-  const visibleItems = items.slice(0, maxDisplayRows);
-  const isOverflow = items.length > maxDisplayRows;
-
-  // Summary box positioning (anchored cleanly below rows and above line y = 1342)
-  const rowsEnd = rowStartY + visibleItems.length * rowHeight;
-  const summaryTop = Math.max(rowsEnd + 20, 780);
-  const hasDiscount = discountAmt > 0;
-  const summaryHeight = hasDiscount ? 170 : 145;
+  // 8. Compute Vertical Reference Layout
+  const layout = computeInvoiceLayout(
+    items,
+    subtotal,
+    discountAmt,
+    total,
+    paidAmount,
+    balanceDue,
+    575
+  );
 
   return (
     <div
@@ -239,35 +398,35 @@ export const OfficialSameekshaInvoice: React.FC<OfficialSameekshaInvoiceProps> =
               font-size: 22px;
               fill: #002244;
             }
-            .inv-th-text {
+            .inv-row-num {
               font-family: 'Segoe UI', Arial, -apple-system, BlinkMacSystemFont, sans-serif;
               font-weight: 700;
-              font-size: 13.5px;
-              letter-spacing: 0.5px;
-              fill: #002244;
+              font-size: 20px;
+              fill: #111827;
             }
-            .inv-td-text {
+            .inv-row-desc {
               font-family: 'Segoe UI', Arial, -apple-system, BlinkMacSystemFont, sans-serif;
-              font-size: 15px;
-              fill: #0f172a;
-            }
-            .inv-td-desc {
-              font-family: 'Segoe UI', Arial, -apple-system, BlinkMacSystemFont, sans-serif;
-              font-size: 15.5px;
               font-weight: 600;
-              fill: #002244;
+              font-size: 20px;
+              fill: #111827;
             }
-            .inv-sum-label {
+            .inv-row-amt {
               font-family: 'Segoe UI', Arial, -apple-system, BlinkMacSystemFont, sans-serif;
-              font-size: 14.5px;
               font-weight: 600;
-              fill: #475569;
+              font-size: 20px;
+              fill: #111827;
             }
-            .inv-sum-val {
+            .inv-total-text {
               font-family: 'Segoe UI', Arial, -apple-system, BlinkMacSystemFont, sans-serif;
-              font-size: 15.5px;
-              font-weight: 700;
-              fill: #0f172a;
+              font-weight: 800;
+              font-size: 24px;
+              fill: #000000;
+            }
+            .inv-sub-text {
+              font-family: 'Segoe UI', Arial, -apple-system, BlinkMacSystemFont, sans-serif;
+              font-weight: 600;
+              font-size: 17px;
+              fill: #374151;
             }
           `}</style>
         </defs>
@@ -336,148 +495,103 @@ export const OfficialSameekshaInvoice: React.FC<OfficialSameekshaInvoiceProps> =
         )}
 
         {/* ============================================================== */}
-        {/* TREATMENT & CHARGES TABLE (Clean Overlay above line y = 1342)  */}
+        {/* VERTICAL TREATMENT LIST & AMOUNTS (Reference Matching Layout)   */}
         {/* ============================================================== */}
-
-        {/* Table Header Bar */}
-        <rect
-          x="65"
-          y={tableStartY}
-          width="934"
-          height={headerHeight}
-          rx="4"
-          fill="#f8fafc"
-          stroke="#cbd5e1"
-          strokeWidth="1.2"
-        />
-
-        <text x="95" y={tableStartY + 23} textAnchor="middle" className="inv-th-text">#</text>
-        <text x="135" y={tableStartY + 23} className="inv-th-text">TREATMENT / PROCEDURE</text>
-        <text x="640" y={tableStartY + 23} textAnchor="middle" className="inv-th-text">QTY</text>
-        <text x="790" y={tableStartY + 23} textAnchor="end" className="inv-th-text">UNIT PRICE (₹)</text>
-        <text x="975" y={tableStartY + 23} textAnchor="end" className="inv-th-text">TOTAL (₹)</text>
-
-        {/* Table Rows */}
-        {visibleItems.map((item, idx) => {
-          const rowY = rowStartY + idx * rowHeight + 22;
-          const dividerY = rowStartY + (idx + 1) * rowHeight;
-          return (
-            <g key={idx}>
-              <text x="95" y={rowY} textAnchor="middle" className="inv-td-text">{idx + 1}</text>
-              <text x="135" y={rowY} className="inv-td-desc">
-                {item.description.length > 48 ? item.description.slice(0, 47) + "…" : item.description}
-              </text>
-              <text x="640" y={rowY} textAnchor="middle" className="inv-td-text">{item.quantity || 1}</text>
-              <text x="790" y={rowY} textAnchor="end" className="inv-td-text">
-                ₹{(item.unitPrice || 0).toLocaleString()}
-              </text>
-              <text x="975" y={rowY} textAnchor="end" className="inv-td-desc">
-                ₹{item.amount.toLocaleString()}
-              </text>
-              <line x1="65" y1={dividerY} x2="999" y2={dividerY} stroke="#e2e8f0" strokeWidth="1" strokeDasharray="3 3" />
-            </g>
-          );
-        })}
-
-        {/* Overflow Note if items exceed single page */}
-        {isOverflow && (
-          <text x="532" y={rowsEnd + 16} textAnchor="middle" fill="#dc2626" fontSize="13px" fontWeight="700">
-            ⚠️ Showing first {maxDisplayRows} of {items.length} treatments. Additional items exceed single-page capacity.
-          </text>
-        )}
-
-        {/* ============================================================== */}
-        {/* FINANCIAL SUMMARY & SIGNATURE (Anchored cleanly above y = 1342) */}
-        {/* ============================================================== */}
-
-        {/* Left Side: Hospital & Signatory Information */}
-        <g transform={`translate(75, ${summaryTop})`}>
-          <text x="0" y="24" fontSize="15px" fontWeight="700" fill="#002244">Dr. Suvarna Raju. P</text>
-          <text x="0" y="44" fontSize="13px" fontWeight="600" fill="#475569">BDS (Reg no. A-8103)</text>
-          <text x="0" y="66" fontSize="13px" fontWeight="700" fill="#002244">Authorized Signatory</text>
-          <text x="0" y="86" fontSize="12px" fill="#64748b">Sameeksha Super Speciality Dental Hospital</text>
-          {paymentMode && (
-            <text x="0" y="112" fontSize="13px" fontWeight="700" fill="#0284c7">
-              Payment Mode: {paymentMode}
+        {layout.rows.map((row, idx) => (
+          <g key={idx}>
+            {/* Number / Sub-prefix */}
+            <text
+              x={row.isSubItem ? "125" : "75"}
+              y={row.y}
+              className="inv-row-num"
+            >
+              {row.prefix}
             </text>
-          )}
-        </g>
 
-        {/* Right Side: Financial Calculation Box */}
-        <rect
-          x="560"
-          y={summaryTop}
-          width="439"
-          height={summaryHeight}
-          rx="6"
-          fill="#f8fafc"
-          stroke="#cbd5e1"
-          strokeWidth="1.2"
+            {/* Description Lines */}
+            {row.descriptionLines.map((line, lIdx) => (
+              <text
+                key={lIdx}
+                x={row.isSubItem ? "155" : "115"}
+                y={row.y + lIdx * 25}
+                className="inv-row-desc"
+              >
+                {line}
+              </text>
+            ))}
+
+            {/* Amount Right-Aligned */}
+            {row.amountStr && (
+              <text
+                x="985"
+                y={row.y}
+                textAnchor="end"
+                className="inv-row-amt"
+              >
+                {row.amountStr}
+              </text>
+            )}
+          </g>
+        ))}
+
+        {/* Horizontal Divider Line beneath the last treatment */}
+        <line
+          x1="65"
+          y1={layout.dividerY}
+          x2="985"
+          y2={layout.dividerY}
+          stroke="#111827"
+          strokeWidth="1.8"
         />
 
-        {/* Subtotal */}
-        <text x="760" y={summaryTop + 26} textAnchor="end" className="inv-sum-label">Subtotal :</text>
-        <text x="975" y={summaryTop + 26} textAnchor="end" className="inv-sum-val">₹{subtotal.toLocaleString()}</text>
-
-        {/* Discount (if applicable) */}
-        {hasDiscount && (
+        {/* Financial Summary (Right-aligned beneath divider) */}
+        {layout.hasDiscount && (
           <>
-            <text x="760" y={summaryTop + 50} textAnchor="end" className="inv-sum-label">
-              Discount {isFixedDiscount ? "" : `(${invoice?.discount}%)`} :
+            <text x="985" y={layout.subtotalY} textAnchor="end" className="inv-sub-text">
+              Subtotal :  {formatInvoiceCurrency(subtotal)}
             </text>
-            <text x="975" y={summaryTop + 50} textAnchor="end" className="inv-sum-val" fill="#dc2626">
-              -₹{discountAmt.toLocaleString()}
+            <text x="985" y={layout.discountY} textAnchor="end" className="inv-sub-text" fill="#dc2626">
+              Discount {isFixedDiscount ? "" : `(${invoice?.discount}%)`} :  -{formatInvoiceCurrency(discountAmt)}
             </text>
           </>
         )}
 
-        {/* Total Payable Highlight Banner */}
-        {(() => {
-          const bannerY = summaryTop + (hasDiscount ? 64 : 40);
-          return (
-            <g>
-              <rect
-                x="562"
-                y={bannerY}
-                width="435"
-                height="38"
-                rx="3"
-                fill="#002244"
-              />
-              <text x="760" y={bannerY + 25} textAnchor="end" fill="#ffffff" fontSize="15px" fontWeight="700">
-                TOTAL PAYABLE :
-              </text>
-              <text x="975" y={bannerY + 26} textAnchor="end" fill="#ffffff" fontSize="19px" fontWeight="800">
-                ₹{total.toLocaleString()}
-              </text>
-            </g>
-          );
-        })()}
+        {/* Prominent Total Line */}
+        <text x="985" y={layout.totalY} textAnchor="end" className="inv-total-text">
+          Total :  {formatInvoiceCurrency(total)}
+        </text>
 
-        {/* Paid & Balance Breakdown */}
-        {(() => {
-          const statsY = summaryTop + (hasDiscount ? 124 : 100);
-          return (
-            <g>
-              <text x="760" y={statsY} textAnchor="end" className="inv-sum-label">Paid Amount :</text>
-              <text x="975" y={statsY} textAnchor="end" fontSize="15px" fontWeight="700" fill="#059669">
-                ₹{paidAmount.toLocaleString()}
-              </text>
+        {/* Payment and Balance Breakdown (only if payments were logged) */}
+        {layout.hasPayment && (
+          <>
+            <text x="985" y={layout.paidY} textAnchor="end" className="inv-sub-text" fill="#059669">
+              Amount Paid :  {formatInvoiceCurrency(paidAmount)}
+            </text>
+            <text
+              x="985"
+              y={layout.balanceY}
+              textAnchor="end"
+              className="inv-sub-text"
+              fill={balanceDue > 0 ? "#dc2626" : "#059669"}
+            >
+              Balance Due :  {balanceDue > 0 ? formatInvoiceCurrency(balanceDue) : "Rs. 0.00 (Paid in Full)"}
+            </text>
+          </>
+        )}
 
-              <text x="760" y={statsY + 22} textAnchor="end" className="inv-sum-label">Balance Due :</text>
-              <text
-                x="975"
-                y={statsY + 22}
-                textAnchor="end"
-                fontSize="15px"
-                fontWeight="700"
-                fill={balanceDue > 0 ? "#dc2626" : "#059669"}
-              >
-                {balanceDue > 0 ? `₹${balanceDue.toLocaleString()}` : "✓ PAID IN FULL"}
-              </text>
-            </g>
-          );
-        })()}
+        {/* Overflow Alert Warning if treatments exceed single-page capacity */}
+        {layout.isOverflow && (
+          <text
+            x="532"
+            y="1330"
+            textAnchor="middle"
+            fill="#dc2626"
+            fontSize="13px"
+            fontWeight="700"
+          >
+            ⚠️ Notice: Treatment list exceeds single-page capacity.
+          </text>
+        )}
       </svg>
     </div>
   );

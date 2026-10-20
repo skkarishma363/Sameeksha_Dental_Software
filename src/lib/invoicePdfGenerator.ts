@@ -1,6 +1,11 @@
 import jsPDF from "jspdf";
 import { getAssetPath } from "./getAssetPath";
-import { formatInvoiceDate, InvoiceLineItem } from "@/components/OfficialSameekshaInvoice";
+import {
+  formatInvoiceDate,
+  formatInvoiceCurrency,
+  computeInvoiceLayout,
+  InvoiceLineItem
+} from "@/components/OfficialSameekshaInvoice";
 
 export interface InvoicePdfData {
   patient?: {
@@ -46,8 +51,9 @@ export interface InvoicePdfData {
 
 /**
  * Generates and triggers download of an authentic Sameeksha Super Speciality Dental Hospital
- * invoice PDF using the fixed original invoice template background with full treatment
- * line items and financial calculations.
+ * invoice PDF using the fixed original invoice template background with a clean, vertically
+ * arranged list of treatments, right-aligned amounts, and a prominent Total matching the
+ * official reference invoice layout.
  *
  * Implements proportional 'contain' scaling centered on A4 to prevent any top or bottom cropping.
  */
@@ -204,180 +210,95 @@ export async function downloadSameekshaInvoicePDF(
         const total = Number(data.invoice.total) || calculatedTotal || subtotal;
         const paidAmount = Number(data.invoice.paidAmount) || (data.invoice.status === "Paid" ? total : 0);
         const balanceDue = Math.max(0, total - paidAmount);
-        const paymentMode = data.invoice.paymentLogs?.[0]?.method || (paidAmount > 0 ? "Cash" : "");
 
-        // 9. Render Treatment Table onto Canvas
-        const tableStartY = 545;
-        const headerHeight = 36;
-        const rowStartY = tableStartY + headerHeight + 10;
-        const rowHeight = items.length > 7 ? 32 : 36;
-        const maxDisplayRows = 10;
-        const visibleItems = items.slice(0, maxDisplayRows);
-        const isOverflow = items.length > maxDisplayRows;
+        // 9. Compute Vertical Layout matching the Reference Image
+        const layout = computeInvoiceLayout(
+          items,
+          subtotal,
+          discountAmt,
+          total,
+          paidAmount,
+          balanceDue,
+          575
+        );
 
-        // Draw Table Header Bar
-        ctx.fillStyle = "#f8fafc";
-        ctx.strokeStyle = "#cbd5e1";
-        ctx.lineWidth = 1.2;
-        ctx.beginPath();
-        ctx.roundRect ? ctx.roundRect(65, tableStartY, 934, headerHeight, 4) : ctx.rect(65, tableStartY, 934, headerHeight);
-        ctx.fill();
-        ctx.stroke();
-
-        // Table Header Text
-        ctx.fillStyle = "#002244";
-        ctx.font = "bold 13.5px 'Segoe UI', Arial, -apple-system, sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText("#", 95, tableStartY + 23);
-        ctx.textAlign = "left";
-        ctx.fillText("TREATMENT / PROCEDURE", 135, tableStartY + 23);
-        ctx.textAlign = "center";
-        ctx.fillText("QTY", 640, tableStartY + 23);
-        ctx.textAlign = "right";
-        ctx.fillText("UNIT PRICE (₹)", 790, tableStartY + 23);
-        ctx.fillText("TOTAL (₹)", 975, tableStartY + 23);
-
-        // Draw Rows
-        visibleItems.forEach((item, idx) => {
-          const rowY = rowStartY + idx * rowHeight + 22;
-          const dividerY = rowStartY + (idx + 1) * rowHeight;
-
-          ctx.textAlign = "center";
-          ctx.fillStyle = "#0f172a";
-          ctx.font = "15px 'Segoe UI', Arial, -apple-system, sans-serif";
-          ctx.fillText(String(idx + 1), 95, rowY);
-
+        // 10. Render Vertically Arranged Treatment Rows onto Canvas
+        layout.rows.forEach((row) => {
+          // Prefix/Number
           ctx.textAlign = "left";
-          ctx.fillStyle = "#002244";
-          ctx.font = "bold 15.5px 'Segoe UI', Arial, -apple-system, sans-serif";
-          const desc = item.description.length > 48 ? item.description.slice(0, 47) + "…" : item.description;
-          ctx.fillText(desc, 135, rowY);
+          ctx.fillStyle = "#111827";
+          ctx.font = "bold 20px 'Segoe UI', Arial, -apple-system, sans-serif";
+          ctx.fillText(row.prefix, row.isSubItem ? 125 : 75, row.y);
 
-          ctx.textAlign = "center";
-          ctx.fillStyle = "#0f172a";
-          ctx.font = "15px 'Segoe UI', Arial, -apple-system, sans-serif";
-          ctx.fillText(String(item.quantity || 1), 640, rowY);
+          // Description lines
+          ctx.font = "600 20px 'Segoe UI', Arial, -apple-system, sans-serif";
+          row.descriptionLines.forEach((line, lIdx) => {
+            ctx.fillText(line, row.isSubItem ? 155 : 115, row.y + lIdx * 25);
+          });
 
-          ctx.textAlign = "right";
-          ctx.fillText(`₹${(item.unitPrice || 0).toLocaleString()}`, 790, rowY);
-
-          ctx.font = "bold 15.5px 'Segoe UI', Arial, -apple-system, sans-serif";
-          ctx.fillStyle = "#002244";
-          ctx.fillText(`₹${item.amount.toLocaleString()}`, 975, rowY);
-
-          // Row divider
-          ctx.strokeStyle = "#e2e8f0";
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.setLineDash([3, 3]);
-          ctx.moveTo(65, dividerY);
-          ctx.lineTo(999, dividerY);
-          ctx.stroke();
-          ctx.setLineDash([]);
+          // Amount right-aligned
+          if (row.amountStr) {
+            ctx.textAlign = "right";
+            ctx.font = "600 20px 'Segoe UI', Arial, -apple-system, sans-serif";
+            ctx.fillText(row.amountStr, 985, row.y);
+          }
         });
 
-        // Overflow Warning Note
-        const rowsEnd = rowStartY + visibleItems.length * rowHeight;
-        if (isOverflow) {
+        // 11. Horizontal Divider Line beneath the last treatment
+        ctx.strokeStyle = "#111827";
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.moveTo(65, layout.dividerY);
+        ctx.lineTo(985, layout.dividerY);
+        ctx.stroke();
+
+        // 12. Financial Summary (Right-aligned beneath divider)
+        ctx.textAlign = "right";
+
+        if (layout.hasDiscount) {
+          ctx.font = "600 17px 'Segoe UI', Arial, -apple-system, sans-serif";
+          ctx.fillStyle = "#374151";
+          ctx.fillText(`Subtotal :  ${formatInvoiceCurrency(subtotal)}`, 985, layout.subtotalY);
+
+          ctx.fillStyle = "#dc2626";
+          const discLabel = isFixedDiscount ? "Fixed" : `${data.invoice.discount}%`;
+          ctx.fillText(`Discount (${discLabel}) :  -${formatInvoiceCurrency(discountAmt)}`, 985, layout.discountY);
+        }
+
+        // Prominent Total Line
+        ctx.font = "bold 24px 'Segoe UI', Arial, -apple-system, sans-serif";
+        ctx.fillStyle = "#000000";
+        ctx.fillText(`Total :  ${formatInvoiceCurrency(total)}`, 985, layout.totalY);
+
+        // Payment Breakdown (only if payments were logged)
+        if (layout.hasPayment) {
+          ctx.font = "600 17px 'Segoe UI', Arial, -apple-system, sans-serif";
+          ctx.fillStyle = "#059669";
+          ctx.fillText(`Amount Paid :  ${formatInvoiceCurrency(paidAmount)}`, 985, layout.paidY);
+
+          ctx.fillStyle = balanceDue > 0 ? "#dc2626" : "#059669";
+          ctx.fillText(
+            `Balance Due :  ${balanceDue > 0 ? formatInvoiceCurrency(balanceDue) : "Rs. 0.00 (Paid in Full)"}`,
+            985,
+            layout.balanceY
+          );
+        }
+
+        // Overflow Alert Warning
+        if (layout.isOverflow) {
           ctx.textAlign = "center";
           ctx.fillStyle = "#dc2626";
           ctx.font = "bold 13px 'Segoe UI', Arial, -apple-system, sans-serif";
-          ctx.fillText(`⚠️ Showing first ${maxDisplayRows} of ${items.length} treatments. Additional items exceed single-page capacity.`, 532, rowsEnd + 16);
+          ctx.fillText("⚠️ Notice: Treatment list exceeds single-page capacity.", 532, 1330);
         }
 
-        // 10. Financial Summary & Signatory Section
-        const summaryTop = Math.max(rowsEnd + 20, 780);
-        const hasDiscount = discountAmt > 0;
-        const summaryHeight = hasDiscount ? 170 : 145;
-
-        // Left Side Signatory Text
-        ctx.textAlign = "left";
-        ctx.fillStyle = "#002244";
-        ctx.font = "bold 15px 'Segoe UI', Arial, -apple-system, sans-serif";
-        ctx.fillText("Dr. Suvarna Raju. P", 75, summaryTop + 24);
-
-        ctx.fillStyle = "#475569";
-        ctx.font = "600 13px 'Segoe UI', Arial, -apple-system, sans-serif";
-        ctx.fillText("BDS (Reg no. A-8103)", 75, summaryTop + 44);
-
-        ctx.fillStyle = "#002244";
-        ctx.font = "bold 13px 'Segoe UI', Arial, -apple-system, sans-serif";
-        ctx.fillText("Authorized Signatory", 75, summaryTop + 66);
-
-        ctx.fillStyle = "#64748b";
-        ctx.font = "12px 'Segoe UI', Arial, -apple-system, sans-serif";
-        ctx.fillText("Sameeksha Super Speciality Dental Hospital", 75, summaryTop + 86);
-
-        if (paymentMode) {
-          ctx.fillStyle = "#0284c7";
-          ctx.font = "bold 13px 'Segoe UI', Arial, -apple-system, sans-serif";
-          ctx.fillText(`Payment Mode: ${paymentMode}`, 75, summaryTop + 112);
-        }
-
-        // Right Side Financial Box
-        ctx.fillStyle = "#f8fafc";
-        ctx.strokeStyle = "#cbd5e1";
-        ctx.lineWidth = 1.2;
-        ctx.beginPath();
-        ctx.roundRect ? ctx.roundRect(560, summaryTop, 439, summaryHeight, 6) : ctx.rect(560, summaryTop, 439, summaryHeight);
-        ctx.fill();
-        ctx.stroke();
-
-        // Subtotal
-        ctx.textAlign = "right";
-        ctx.fillStyle = "#475569";
-        ctx.font = "600 14.5px 'Segoe UI', Arial, -apple-system, sans-serif";
-        ctx.fillText("Subtotal :", 760, summaryTop + 26);
-        ctx.fillStyle = "#0f172a";
-        ctx.font = "bold 15.5px 'Segoe UI', Arial, -apple-system, sans-serif";
-        ctx.fillText(`₹${subtotal.toLocaleString()}`, 975, summaryTop + 26);
-
-        // Discount
-        if (hasDiscount) {
-          ctx.fillStyle = "#475569";
-          ctx.font = "600 14.5px 'Segoe UI', Arial, -apple-system, sans-serif";
-          ctx.fillText(`Discount ${isFixedDiscount ? "" : `(${data.invoice.discount}%)`} :`, 760, summaryTop + 50);
-          ctx.fillStyle = "#dc2626";
-          ctx.font = "bold 15.5px 'Segoe UI', Arial, -apple-system, sans-serif";
-          ctx.fillText(`-₹${discountAmt.toLocaleString()}`, 975, summaryTop + 50);
-        }
-
-        // Total Banner
-        const bannerY = summaryTop + (hasDiscount ? 64 : 40);
-        ctx.fillStyle = "#002244";
-        ctx.beginPath();
-        ctx.roundRect ? ctx.roundRect(562, bannerY, 435, 38, 3) : ctx.rect(562, bannerY, 435, 38);
-        ctx.fill();
-
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 15px 'Segoe UI', Arial, -apple-system, sans-serif";
-        ctx.fillText("TOTAL PAYABLE :", 760, bannerY + 25);
-        ctx.font = "bold 19px 'Segoe UI', Arial, -apple-system, sans-serif";
-        ctx.fillText(`₹${total.toLocaleString()}`, 975, bannerY + 26);
-
-        // Paid & Balance Due
-        const statsY = summaryTop + (hasDiscount ? 124 : 100);
-        ctx.fillStyle = "#475569";
-        ctx.font = "600 14.5px 'Segoe UI', Arial, -apple-system, sans-serif";
-        ctx.fillText("Paid Amount :", 760, statsY);
-        ctx.fillStyle = "#059669";
-        ctx.font = "bold 15px 'Segoe UI', Arial, -apple-system, sans-serif";
-        ctx.fillText(`₹${paidAmount.toLocaleString()}`, 975, statsY);
-
-        ctx.fillStyle = "#475569";
-        ctx.font = "600 14.5px 'Segoe UI', Arial, -apple-system, sans-serif";
-        ctx.fillText("Balance Due :", 760, statsY + 22);
-        ctx.fillStyle = balanceDue > 0 ? "#dc2626" : "#059669";
-        ctx.font = "bold 15px 'Segoe UI', Arial, -apple-system, sans-serif";
-        ctx.fillText(balanceDue > 0 ? `₹${balanceDue.toLocaleString()}` : "✓ PAID IN FULL", 975, statsY + 22);
-
-        // 11. Build PDF with jsPDF (A4 standard format with proportional scaling & centering)
+        // 13. Build PDF with jsPDF (A4 standard format with proportional scaling & centering)
         // Image aspect ratio: 1064 / 1479 = 0.719405
         // On standard A4 (210 x 297 mm):
         // Printable width = 200 mm -> Proportional height = 200 * (1479 / 1064) = 278.0075 mm
         // X offset = (210 - 200) / 2 = 5.0 mm
         // Y offset = (297 - 278.0075) / 2 = 9.496 mm
-        // This guarantees all 4 borders (top, bottom, left, right) are 100% visible with zero clipping!
+        // Guarantees all 4 borders are 100% visible with zero clipping!
         const imgData = canvas.toDataURL("image/jpeg", 0.96);
         const doc = new jsPDF({
           orientation: "portrait",
@@ -393,7 +314,7 @@ export async function downloadSameekshaInvoicePDF(
         const fileName = `Sameeksha_Invoice_${safePatientName}_${safeInvoiceNo}_${safeDate}.pdf`;
 
         doc.save(fileName);
-        resolve({ success: true, isOverflow });
+        resolve({ success: true, isOverflow: layout.isOverflow });
       };
 
       img.onerror = (err) => {
