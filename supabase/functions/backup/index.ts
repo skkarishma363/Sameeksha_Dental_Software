@@ -2,27 +2,36 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 
 const allowedOrigins = [
+  "https://sameekshadental.com",
+  "https://www.sameekshadental.com",
+  "https://skkarishma363.github.io",
+  "https://jabeershaik786.github.io",
   "http://localhost:3000",
   "http://127.0.0.1:3000",
-  "https://jabeershaik786.github.io",
-  "https://skkarishma363.github.io",
 ];
 
 serve(async (req: Request) => {
-  const requestOrigin = req.headers.get("Origin") ?? "";
+  const rawOrigin = req.headers.get("Origin") ?? "";
+  const requestOrigin = rawOrigin.trim().replace(/\/+$/, "");
+  const isAllowed = allowedOrigins.includes(requestOrigin);
 
   const corsHeaders = {
-    "Access-Control-Allow-Origin": allowedOrigins.includes(requestOrigin)
-      ? requestOrigin
-      : "",
+    "Access-Control-Allow-Origin": isAllowed ? requestOrigin : "",
     "Access-Control-Allow-Headers":
-      "authorization, x-client-info, apikey, content-type",
+      "authorization, x-client-info, apikey, content-type, prefer, x-requested-with",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Max-Age": "86400",
     "Vary": "Origin",
   };
 
   // 1. Handle CORS Preflight Requests
   if (req.method === "OPTIONS") {
+    if (rawOrigin && !isAllowed) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Origin not allowed by CORS policy." }),
+        { status: 403, headers: { "Content-Type": "application/json" } }
+      );
+    }
     return new Response("ok", { status: 200, headers: corsHeaders });
   }
 

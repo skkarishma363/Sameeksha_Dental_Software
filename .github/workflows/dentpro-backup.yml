@@ -1,12 +1,19 @@
-name: DentPro OS Database Backup Test
+name: DentPro OS Database Backup
 
 on:
+  schedule:
+    # Daily backup at 18:30 UTC = 00:00 (Midnight) IST (Asia/Kolkata), outside clinic working hours
+    - cron: '30 18 * * *'
   workflow_dispatch:
     inputs:
       backup_id:
         description: 'Supabase backup_history UUID'
         required: false
         type: string
+
+concurrency:
+  group: dentpro-backup
+  cancel-in-progress: false
 
 jobs:
   backup:
@@ -119,7 +126,7 @@ jobs:
           MAGIC_HEADER = b"DENTPRO1"
           VERSION = b"\x01"
           HEADER = MAGIC_HEADER + VERSION
-          FOLDER_NAME = "DentPro OS Backups"
+          FOLDER_NAME = "Sameeksha Dental Backups"
 
           plain_filepath = sys.argv[1]
           enc_filepath = sys.argv[2]
@@ -188,8 +195,14 @@ jobs:
               )
 
               if token_resp.status_code != 200:
+                  err_msg = ""
+                  try:
+                      err_json = token_resp.json()
+                      err_msg = f": {err_json.get('error', '')} - {err_json.get('error_description', '')}"
+                  except Exception:
+                      pass
                   raise RuntimeError(
-                      f"Google OAuth token refresh failed (HTTP {token_resp.status_code}). Please verify OAuth credentials."
+                      f"Google OAuth token refresh failed (HTTP {token_resp.status_code}){err_msg}. Please verify OAuth credentials."
                   )
 
               token_data = token_resp.json()
@@ -322,9 +335,17 @@ jobs:
               supabase_url = os.environ.get("SUPABASE_URL", "")
               callback_secret = os.environ.get("BACKUP_CALLBACK_SECRET", "")
 
-              if backup_id and supabase_url and callback_secret:
+              if supabase_url and callback_secret:
                   print("Sending completion status to Supabase backup-callback...")
                   cb_url = f"{supabase_url.rstrip('/')}/functions/v1/backup-callback"
+                  payload = {
+                      "status": "completed",
+                      "backup_size": v_size,
+                      "file_name": v_name,
+                  }
+                  if backup_id:
+                      payload["backup_id"] = backup_id
+
                   try:
                       cb_resp = requests.post(
                           cb_url,
@@ -332,12 +353,7 @@ jobs:
                               "x-callback-secret": callback_secret,
                               "Content-Type": "application/json",
                           },
-                          json={
-                              "backup_id": backup_id,
-                              "status": "completed",
-                              "backup_size": v_size,
-                              "file_name": v_name,
-                          },
+                          json=payload,
                           timeout=30,
                       )
                       print(f"Callback response: HTTP {cb_resp.status_code}")
@@ -356,17 +372,22 @@ jobs:
           EOF
 
       - name: Notify Supabase on Backup Failure
-        if: failure() && github.event.inputs.backup_id != ''
+        if: failure()
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           BACKUP_CALLBACK_SECRET: ${{ secrets.BACKUP_CALLBACK_SECRET }}
           BACKUP_ID: ${{ github.event.inputs.backup_id }}
         run: |
           set -euo pipefail
-          if [ -n "${SUPABASE_URL:-}" ] && [ -n "${BACKUP_CALLBACK_SECRET:-}" ] && [ -n "${BACKUP_ID:-}" ]; then
+          if [ -n "${SUPABASE_URL:-}" ] && [ -n "${BACKUP_CALLBACK_SECRET:-}" ]; then
             echo "Reporting backup failure to Supabase backup-callback..."
+            if [ -n "${BACKUP_ID:-}" ]; then
+              PAYLOAD="{\"backup_id\": \"${BACKUP_ID}\", \"status\": \"failed\"}"
+            else
+              PAYLOAD="{\"status\": \"failed\"}"
+            fi
             curl -s -X POST "${SUPABASE_URL%/}/functions/v1/backup-callback" \
               -H "x-callback-secret: ${BACKUP_CALLBACK_SECRET}" \
               -H "Content-Type: application/json" \
-              -d "{\"backup_id\": \"${BACKUP_ID}\", \"status\": \"failed\"}" || true
+              -d "$PAYLOAD" || true
           fi

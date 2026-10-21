@@ -308,6 +308,7 @@ interface BackupHistoryItem {
   time: string;
   size: string;
   status: string;
+  fileName?: string;
 }
 
 interface TreatmentItem {
@@ -1085,11 +1086,19 @@ export function validate10DigitPhone(phoneStr: string): boolean {
   return digits.length === 10;
 }
 
-// Sequential 4-digit Patient ID Generator (0001, 0002, ...)
+// Sequential Patient ID Generator starting from 19000
 export function getNextSequentialPatientId(patientsList: Array<{ id?: string; patient_id?: string }>): string {
   let maxNum = 0;
+  const isUuid = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str.trim());
+
   patientsList.forEach(p => {
-    const rawId = p.id || p.patient_id || "";
+    // Prioritize patient_id over id, and avoid using id if it is a UUID
+    let rawId = (p.patient_id || "").trim();
+    if (!rawId && p.id && !isUuid(p.id)) {
+      rawId = p.id.trim();
+    }
+    if (!rawId || isUuid(rawId)) return;
+
     const matches = rawId.match(/\d+/g);
     if (matches) {
       matches.forEach(m => {
@@ -1100,8 +1109,11 @@ export function getNextSequentialPatientId(patientsList: Array<{ id?: string; pa
       });
     }
   });
-  const nextNum = maxNum + 1;
-  return nextNum.toString().padStart(4, "0");
+
+  if (maxNum < 19000) {
+    return "19000";
+  }
+  return (maxNum + 1).toString();
 }
 
 const DEFAULT_MOCK_PATIENTS = [
@@ -3171,6 +3183,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
             time: timeStr,
             size: formattedSize,
             status: statusStr,
+            fileName: row.file_name || undefined,
           };
         });
 
@@ -5830,18 +5843,24 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       }
     }
 
-    // Generate unique Patient ID by counting rows in the database
-    const { count, error: countErr } = await supabase
-      .from("patients")
-      .select("*", { count: "exact", head: true });
-
-    if (countErr) {
-      console.error("Walk-in ID generation failed: count query error", countErr.message, countErr.code);
-      showToast("Failed to generate patient ID.", "error");
-      return;
+    // Generate sequential Patient ID starting from 19000
+    let patientId = "";
+    try {
+      const { data: rpcNextId } = await supabase.rpc("get_next_patient_id");
+      if (rpcNextId && typeof rpcNextId === "string") {
+        patientId = rpcNextId;
+      }
+    } catch {
+      // Fallback to query
     }
 
-    const patientId = `DS-${1000 + (count || 0) + 1}`;
+    if (!patientId) {
+      const { data: dbAllPats } = await supabase
+        .from("patients")
+        .select("patient_id");
+      const combinedList = dbAllPats && dbAllPats.length > 0 ? dbAllPats.map(p => ({ id: p.patient_id })) : patients;
+      patientId = getNextSequentialPatientId(combinedList);
+    }
 
     const { data: insertedPat, error } = await supabase
       .from("patients")
@@ -6179,43 +6198,79 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         }
       }
 
-      // Generate continuous 4-digit sequential Patient ID (0001, 0002, ...)
-      const { data: dbAllPats } = await supabase
-        .from("patients")
-        .select("patient_id");
+      // Generate sequential Patient ID starting from 19000
+      let nextIdCandidate = "";
+      try {
+        const { data: rpcNextId } = await supabase.rpc("get_next_patient_id");
+        if (rpcNextId && typeof rpcNextId === "string") {
+          nextIdCandidate = rpcNextId;
+        }
+      } catch (rpcErr) {
+        console.warn("get_next_patient_id RPC query error:", rpcErr);
+      }
 
-      const combinedList = dbAllPats && dbAllPats.length > 0 ? dbAllPats.map(p => ({ id: p.patient_id })) : patients;
-      const patientId = getNextSequentialPatientId(combinedList);
+      if (!nextIdCandidate) {
+        const { data: dbAllPats } = await supabase
+          .from("patients")
+          .select("patient_id");
+        const combinedList = dbAllPats && dbAllPats.length > 0 ? dbAllPats.map(p => ({ id: p.patient_id })) : patients;
+        nextIdCandidate = getNextSequentialPatientId(combinedList);
+      }
 
-      // Perform database insertion
-      const { data: insertedPat, error } = await supabase
-        .from("patients")
-        .insert({
-          patient_id: patientId,
-          name: trimmedName,
-          phone: standardFormattedPhone,
-          age: parsedAge,
-          gender: patientData.gender,
-          address: patientData.address || "Bengaluru",
-          visit: null,
-          medical_notes: patientData.medicalNotes || "None",
-          balance: "₹0",
-          status: "Active",
-          notes: patientData.notes || [],
-          email: patientData.email || null,
-          blood_group: patientData.bloodGroup || null,
-          patient_type: patientData.patientType || null,
-          occupation: patientData.occupation?.trim() || null,
-          reference: patientData.reference?.trim() || null,
-          medical_history: patientData.medicalHistory || [],
-          medical_history_others: patientData.medicalHistoryOthers?.trim() || null
-        })
-        .select()
-        .single();
+      // Perform database insertion with concurrency retry
+      let insertedPat: any = null;
+      let lastInsertError: any = null;
 
-      if (error || !insertedPat) {
-        console.error("Patient insert failed:", error?.message, error?.code);
-        if (error?.message?.includes("DUPLICATE_PATIENT_ERROR") || error?.message?.includes("duplicate")) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { data, error } = await supabase
+          .from("patients")
+          .insert({
+            patient_id: nextIdCandidate,
+            name: trimmedName,
+            phone: standardFormattedPhone,
+            age: parsedAge,
+            gender: patientData.gender,
+            address: patientData.address || "Bengaluru",
+            visit: null,
+            medical_notes: patientData.medicalNotes || "None",
+            balance: "₹0",
+            status: "Active",
+            notes: patientData.notes || [],
+            email: patientData.email || null,
+            blood_group: patientData.bloodGroup || null,
+            patient_type: patientData.patientType || null,
+            occupation: patientData.occupation?.trim() || null,
+            reference: patientData.reference?.trim() || null,
+            medical_history: patientData.medicalHistory || [],
+            medical_history_others: patientData.medicalHistoryOthers?.trim() || null
+          })
+          .select()
+          .single();
+
+        if (!error && data) {
+          insertedPat = data;
+          lastInsertError = null;
+          break;
+        }
+
+        lastInsertError = error;
+        // If error is duplicate name/phone trigger, stop retrying immediately
+        if (error?.message?.includes("DUPLICATE_PATIENT_ERROR")) {
+          break;
+        }
+
+        // If duplicate patient_id collision occurs under high concurrency, fetch fresh next ID and retry
+        if (error?.message?.includes("unique") || error?.message?.includes("patient_id") || error?.code === "23505") {
+          const { data: freshPats } = await supabase.from("patients").select("patient_id");
+          nextIdCandidate = getNextSequentialPatientId(freshPats || []);
+          continue;
+        }
+        break;
+      }
+
+      if (lastInsertError || !insertedPat) {
+        console.error("Patient insert failed:", lastInsertError?.message, lastInsertError?.code);
+        if (lastInsertError?.message?.includes("DUPLICATE_PATIENT_ERROR") || lastInsertError?.message?.includes("duplicate")) {
           showToast("Duplicate registration prevented: A patient with this name and phone already exists.", "error");
         } else {
           showToast("Failed to register patient in database.", "error");
@@ -6256,7 +6311,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         }
         return [newPat, ...prev];
       });
-      pushActivity("Register", `Registered patient ${trimmedName} (${patientId}).`);
+      pushActivity("Register", `Registered patient ${trimmedName} (${newPat.id}).`);
 
       // Add notification
       setNotifications(prev => [
@@ -12339,6 +12394,10 @@ ${clinicName}`;
               }
             }} className="space-y-4">
               <div className="space-y-1.5">
+                <Label htmlFor="subTabPatId">Patient ID</Label>
+                <Input id="subTabPatId" value={getNextSequentialPatientId(patients)} disabled className="bg-slate-50 dark:bg-slate-900 opacity-60 cursor-not-allowed font-bold" />
+              </div>
+              <div className="space-y-1.5">
                 <Label htmlFor="newPatName">Patient Full Name</Label>
                 <Input id="newPatName" placeholder="e.g. Aarav Mehta" value={newPatName} onChange={e => setNewPatName(e.target.value)} required />
               </div>
@@ -14664,13 +14723,15 @@ ${clinicName}`;
         });
 
         if (error || !data?.success) {
-          showToast("Unable to start backup. Please try again.", "error");
+          const errorMsg = data?.error || error?.message || "Unable to start backup. Please try again.";
+          showToast(errorMsg, "error");
         } else {
-          showToast("Backup started successfully.", "success");
+          showToast("Backup started successfully. Encrypted upload in progress...", "success");
           await fetchBackupHistory();
         }
-      } catch (_err) {
-        showToast("Unable to start backup. Please try again.", "error");
+      } catch (err: any) {
+        const errorMsg = err?.message || "Unable to start backup. Please try again.";
+        showToast(errorMsg, "error");
       } finally {
         setIsBackingUp(false);
       }
@@ -14971,14 +15032,14 @@ ${clinicName}`;
                   let statusTextColor = "text-slate-900 dark:text-white";
 
                   if (latestBackup) {
-                    displayLastBackup = latestBackup.date;
+                    displayLastBackup = `${latestBackup.date} • ${latestBackup.time}`;
 
-                    if (latestStatusLower === "triggered") {
-                      displayBackupStatus = "Triggered";
+                    if (latestStatusLower === "triggered" || latestStatusLower === "pending") {
+                      displayBackupStatus = "Triggered / In Progress";
                       displayBackupSize = "--";
                       statusTextColor = "text-amber-600 dark:text-amber-400";
                     } else if (latestStatusLower === "completed") {
-                      displayBackupStatus = "Encrypted";
+                      displayBackupStatus = "Encrypted & Uploaded";
                       displayBackupSize = latestBackup.size || "--";
                       statusTextColor = "text-emerald-600 dark:text-emerald-400";
                     } else if (latestStatusLower === "failed") {
@@ -14993,19 +15054,27 @@ ${clinicName}`;
 
                   return (
                     <div className="space-y-2">
-                      <span className="text-[12px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 block">Backup Information</span>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <span className="text-[12px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 block">Backup Overview</span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                         <div className="p-3.5 border border-slate-100 dark:border-slate-800/80 rounded-xl bg-slate-50/50 dark:bg-slate-900/40">
                           <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500 block">Last Backup</span>
-                          <span className="text-[14px] font-semibold text-slate-900 dark:text-white block mt-1">{displayLastBackup}</span>
+                          <span className="text-[13px] font-semibold text-slate-900 dark:text-white block mt-1 truncate" title={displayLastBackup}>{displayLastBackup}</span>
+                          <span className="text-[11px] text-slate-400 dark:text-slate-500 block mt-0.5">{displayBackupSize !== "--" ? `Size: ${displayBackupSize}` : "Awaiting run"}</span>
                         </div>
                         <div className="p-3.5 border border-slate-100 dark:border-slate-800/80 rounded-xl bg-slate-50/50 dark:bg-slate-900/40">
-                          <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500 block">Backup Size</span>
-                          <span className="text-[14px] font-semibold text-slate-900 dark:text-white block mt-1">{displayBackupSize}</span>
+                          <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500 block">Next Scheduled Backup</span>
+                          <span className="text-[13px] font-semibold text-slate-900 dark:text-white block mt-1">12:00 AM IST (Daily)</span>
+                          <span className="text-[11px] text-slate-400 dark:text-slate-500 block mt-0.5">Asia/Kolkata (Nightly)</span>
+                        </div>
+                        <div className="p-3.5 border border-slate-100 dark:border-slate-800/80 rounded-xl bg-slate-50/50 dark:bg-slate-900/40">
+                          <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500 block">Storage Destination</span>
+                          <span className="text-[13px] font-semibold text-slate-900 dark:text-white block mt-1">Google Drive</span>
+                          <span className="text-[11px] text-slate-400 dark:text-slate-500 block mt-0.5">Folder: Sameeksha Dental Backups</span>
                         </div>
                         <div className="p-3.5 border border-slate-100 dark:border-slate-800/80 rounded-xl bg-slate-50/50 dark:bg-slate-900/40">
                           <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500 block">Backup Status</span>
-                          <span className={`text-[14px] font-semibold block mt-1 ${statusTextColor}`}>{displayBackupStatus}</span>
+                          <span className={`text-[13px] font-semibold block mt-1 ${statusTextColor}`}>{displayBackupStatus}</span>
+                          <span className="text-[11px] text-slate-400 dark:text-slate-500 block mt-0.5">AES-256-GCM Encrypted</span>
                         </div>
                       </div>
                     </div>
@@ -15016,38 +15085,54 @@ ${clinicName}`;
                 <div className="space-y-3 pt-2">
                   <span className="text-[12px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 block">Backup History</span>
                   <div className="border border-slate-100 dark:border-slate-800/80 rounded-xl overflow-x-auto scrollbar-thin">
-                    <table className="w-full min-w-[620px] text-left text-[13px]">
+                    <table className="w-full min-w-[700px] text-left text-[13px]">
                       <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-100 dark:border-slate-800/80 text-slate-500 dark:text-slate-400 font-medium">
                         <tr>
-                          <th className="py-2.5 px-4 whitespace-nowrap min-w-[180px]">Date & Time</th>
-                          <th className="py-2.5 px-4 whitespace-nowrap min-w-[110px]">Backup Size</th>
+                          <th className="py-2.5 px-4 whitespace-nowrap min-w-[170px]">Date & Time</th>
+                          <th className="py-2.5 px-4 whitespace-nowrap min-w-[200px]">File Name</th>
+                          <th className="py-2.5 px-4 whitespace-nowrap min-w-[90px]">Size</th>
+                          <th className="py-2.5 px-4 whitespace-nowrap min-w-[120px]">Destination</th>
                           <th className="py-2.5 px-4 whitespace-nowrap min-w-[110px]">Status</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-                        {backupHistory.map(item => {
-                          const statusLower = item.status?.toLowerCase() || "";
-                          const badgeStyle =
-                            statusLower === "triggered"
-                              ? "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 border-amber-100 dark:border-amber-900/40"
-                              : statusLower === "failed"
-                              ? "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400 border-rose-100 dark:border-rose-900/40"
-                              : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/40";
+                        {backupHistory.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="py-8 text-center text-slate-400 dark:text-slate-500 text-[13px]">
+                              No backups recorded yet. Click &ldquo;Backup Now&rdquo; to trigger an immediate encrypted backup to Google Drive.
+                            </td>
+                          </tr>
+                        ) : (
+                          backupHistory.map(item => {
+                            const statusLower = item.status?.toLowerCase() || "";
+                            const isPending = statusLower === "triggered" || statusLower === "pending";
+                            const isFailed = statusLower === "failed";
+                            const badgeStyle = isPending
+                              ? "bg-amber-50 text-amber-700 dark:bg-amber-955/40 dark:text-amber-400 border-amber-100 dark:border-amber-900/40"
+                              : isFailed
+                              ? "bg-rose-50 text-rose-700 dark:bg-rose-955/40 dark:text-rose-400 border-rose-100 dark:border-rose-900/40"
+                              : "bg-emerald-50 text-emerald-700 dark:bg-emerald-955/40 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/40";
+                            const badgeText = isPending ? "Triggered" : isFailed ? "Failed" : "Encrypted";
 
-                          return (
-                            <tr key={item.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/40">
-                              <td className="py-3 px-4 font-medium text-slate-900 dark:text-white whitespace-nowrap">
-                                {item.date} • {item.time}
-                              </td>
-                              <td className="py-3 px-4 text-slate-600 dark:text-slate-400 whitespace-nowrap">{item.size}</td>
-                              <td className="py-3 px-4 whitespace-nowrap">
-                                <span className={`px-2.5 py-0.5 border rounded-full text-[11px] font-medium inline-block ${badgeStyle}`}>
-                                  {item.status}
-                                </span>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                            return (
+                              <tr key={item.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/40">
+                                <td className="py-3 px-4 font-medium text-slate-900 dark:text-white whitespace-nowrap">
+                                  {item.date} • {item.time}
+                                </td>
+                                <td className="py-3 px-4 text-slate-600 dark:text-slate-400 font-mono text-[12px] truncate max-w-[240px]" title={item.fileName || "Pending upload"}>
+                                  {item.fileName || "--"}
+                                </td>
+                                <td className="py-3 px-4 text-slate-600 dark:text-slate-400 whitespace-nowrap">{item.size}</td>
+                                <td className="py-3 px-4 text-slate-600 dark:text-slate-400 whitespace-nowrap">Google Drive</td>
+                                <td className="py-3 px-4 whitespace-nowrap">
+                                  <span className={`px-2.5 py-0.5 border rounded-full text-[11px] font-medium inline-block ${badgeStyle}`}>
+                                    {badgeText}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -16330,6 +16415,10 @@ ${clinicName}`;
                   }
                 }} className="flex flex-col min-h-0 h-full">
                   <div className="flex-1 overflow-y-auto space-y-4 pr-1 py-1">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="modalPatId">Patient ID</Label>
+                      <Input id="modalPatId" value={getNextSequentialPatientId(patients)} disabled className="bg-slate-50 dark:bg-slate-900 opacity-60 cursor-not-allowed font-bold" />
+                    </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="newPatName">Patient Full Name</Label>
                       <Input id="newPatName" placeholder="e.g. Aarav Mehta" value={newPatName} onChange={e => setNewPatName(e.target.value)} required />

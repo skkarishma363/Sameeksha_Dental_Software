@@ -189,10 +189,15 @@ serve(async (req) => {
       if (matchedPatient) {
         patientUuid = matchedPatient.id;
       } else {
-        // Sequential 4-digit ID calculation (0001, 0002, ...)
+        // Sequential Patient ID starting from 19000
         let maxNum = 0;
-        (dbPatients || []).forEach((p: any) => {
-          const rawId = p.patient_id || p.id || "";
+        const isUuid = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str.trim());
+        (dbPatients || []).forEach((p: { patient_id?: string; id?: string }) => {
+          let rawId = (p.patient_id || "").trim();
+          if (!rawId && p.id && !isUuid(p.id)) {
+            rawId = p.id.trim();
+          }
+          if (!rawId || isUuid(rawId)) return;
           const matches = rawId.match(/\d+/g);
           if (matches) {
             matches.forEach((m: string) => {
@@ -201,7 +206,7 @@ serve(async (req) => {
             });
           }
         });
-        const newSeqId = (maxNum + 1).toString().padStart(4, "0");
+        const newSeqId = maxNum < 19000 ? "19000" : (maxNum + 1).toString();
 
         const { data: newPat, error: newPatErr } = await supabase
           .from("patients")

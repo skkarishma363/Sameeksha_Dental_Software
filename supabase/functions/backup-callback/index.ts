@@ -29,9 +29,9 @@ serve(async (req: Request) => {
     const uuidRegex =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-    if (!backup_id || typeof backup_id !== "string" || !uuidRegex.test(backup_id)) {
+    if (backup_id && (typeof backup_id !== "string" || !uuidRegex.test(backup_id))) {
       return new Response(
-        JSON.stringify({ success: false, error: "Invalid backup_id." }),
+        JSON.stringify({ success: false, error: "Invalid backup_id format." }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
@@ -59,46 +59,69 @@ serve(async (req: Request) => {
       auth: { persistSession: false },
     });
 
-    // 5. Update Exact backup_history Row
-    if (status === "completed") {
-      const parsedSize = backup_size ? Number(backup_size) : null;
-      const { error: updateErr } = await adminSupabase
-        .from("backup_history")
-        .update({
-          status: "completed",
-          backup_size: parsedSize,
-          file_name: file_name ? String(file_name) : null,
-          completed_at: new Date().toISOString(),
-        })
-        .eq("id", backup_id);
+    const parsedSize = backup_size ? Number(backup_size) : null;
+    const completedAt = new Date().toISOString();
 
-      if (updateErr) {
-        console.error("Diagnostic: Error updating backup_history record to completed:", updateErr.message);
-        return new Response(
-          JSON.stringify({ success: false, error: "Failed to update backup record." }),
-          { status: 500, headers: { "Content-Type": "application/json" } }
-        );
+    // 5. Update Exact backup_history Row (if backup_id provided) or Insert New Row (for scheduled cron runs)
+    if (backup_id) {
+      if (status === "completed") {
+        const { error: updateErr } = await adminSupabase
+          .from("backup_history")
+          .update({
+            status: "completed",
+            backup_size: parsedSize,
+            file_name: file_name ? String(file_name) : null,
+            completed_at: completedAt,
+          })
+          .eq("id", backup_id);
+
+        if (updateErr) {
+          console.error("Diagnostic: Error updating backup_history record to completed:", updateErr.message);
+          return new Response(
+            JSON.stringify({ success: false, error: "Failed to update backup record." }),
+            { status: 500, headers: { "Content-Type": "application/json" } }
+          );
+        }
+      } else {
+        // status === "failed"
+        const { error: updateErr } = await adminSupabase
+          .from("backup_history")
+          .update({
+            status: "failed",
+            completed_at: completedAt,
+          })
+          .eq("id", backup_id);
+
+        if (updateErr) {
+          console.error("Diagnostic: Error updating backup_history record to failed:", updateErr.message);
+          return new Response(
+            JSON.stringify({ success: false, error: "Failed to update backup record." }),
+            { status: 500, headers: { "Content-Type": "application/json" } }
+          );
+        }
       }
     } else {
-      // status === "failed"
-      const { error: updateErr } = await adminSupabase
+      // Scheduled cron job without pre-existing backup_id
+      const { error: insertErr } = await adminSupabase
         .from("backup_history")
-        .update({
-          status: "failed",
-        })
-        .eq("id", backup_id);
+        .insert({
+          status: status,
+          backup_size: status === "completed" ? parsedSize : null,
+          file_name: status === "completed" && file_name ? String(file_name) : null,
+          completed_at: completedAt,
+        });
 
-      if (updateErr) {
-        console.error("Diagnostic: Error updating backup_history record to failed:", updateErr.message);
+      if (insertErr) {
+        console.error("Diagnostic: Error inserting scheduled backup_history record:", insertErr.message);
         return new Response(
-          JSON.stringify({ success: false, error: "Failed to update backup record." }),
+          JSON.stringify({ success: false, error: "Failed to insert backup record." }),
           { status: 500, headers: { "Content-Type": "application/json" } }
         );
       }
     }
 
     return new Response(
-      JSON.stringify({ success: true, message: `Backup status updated to ${status}.` }),
+      JSON.stringify({ success: true, message: `Backup status recorded as ${status}.` }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
   } catch (_err) {
