@@ -228,7 +228,7 @@ export const OfficialSameekshaCaseSheet: React.FC<OfficialSameekshaCaseSheetProp
       {/* 1. Authentic Template Image Background */}
       <img
         src={assetSrc}
-        alt="Sameeksha Multi Speciality Dental Hospital Case Sheet Template"
+        alt="Sameeksha Super Speciality Dental Hospital Case Sheet Template"
         className="absolute inset-0 w-full h-full object-contain pointer-events-none"
         style={{
           width: "100%",
@@ -264,37 +264,37 @@ export const OfficialSameekshaCaseSheet: React.FC<OfficialSameekshaCaseSheetProp
         {/* ============================================================== */}
         {/* O.P. No. 6-DIGIT BOX OVERLAY                                   */}
         {/* Covers scanned 18830 stamp with clean white slots & dividers  */}
-        {/* Bounds: x: 748..987, y: 149..205 (width: 239px, height: 56px)  */}
+        {/* Bounds: x: 750..1002, y: 168..205.5 (width: 252px, height: 37.5px) */}
         {/* ============================================================== */}
         <rect
-          x="748"
-          y="149"
-          width="239"
-          height="56"
+          x="750"
+          y="168"
+          width="252"
+          height="37.5"
           fill="#ffffff"
           stroke="#002b66"
           strokeWidth="2"
         />
         {/* Slot Dividers */}
-        <line x1="787.8" y1="149" x2="787.8" y2="205" stroke="#002b66" strokeWidth="1.5" />
-        <line x1="827.6" y1="149" x2="827.6" y2="205" stroke="#002b66" strokeWidth="1.5" />
-        <line x1="867.5" y1="149" x2="867.5" y2="205" stroke="#002b66" strokeWidth="1.5" />
-        <line x1="907.3" y1="149" x2="907.3" y2="205" stroke="#002b66" strokeWidth="1.5" />
-        <line x1="947.1" y1="149" x2="947.1" y2="205" stroke="#002b66" strokeWidth="1.5" />
+        <line x1="792" y1="168" x2="792" y2="205.5" stroke="#002b66" strokeWidth="1.5" />
+        <line x1="834" y1="168" x2="834" y2="205.5" stroke="#002b66" strokeWidth="1.5" />
+        <line x1="876" y1="168" x2="876" y2="205.5" stroke="#002b66" strokeWidth="1.5" />
+        <line x1="918" y1="168" x2="918" y2="205.5" stroke="#002b66" strokeWidth="1.5" />
+        <line x1="960" y1="168" x2="960" y2="205.5" stroke="#002b66" strokeWidth="1.5" />
 
-        {/* 6 Digit Values (horizontally and vertically centered in slots, 31px bold) */}
+        {/* 6 Digit Values (horizontally and vertically centered in slots, 24px bold) */}
         {opDigits.map((digit, i) => {
-          const cx = 748 + i * 39.83 + 19.9;
+          const cx = 750 + i * 42 + 21;
           return (
             <text
               key={i}
               x={cx}
-              y="177"
+              y="186.75"
               dominantBaseline="central"
               textAnchor="middle"
               fontFamily="'Lucida Console', Monaco, monospace, sans-serif"
               fontWeight="900"
-              fontSize="31px"
+              fontSize="24px"
               fill="#002b66"
             >
               {digit}
