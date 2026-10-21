@@ -2166,6 +2166,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
 
   // Billing Edit Modal states & handlers
   const [editingInvoice, setEditingInvoice] = useState<InvoiceItem | null>(null);
+  const [editInvoiceCustomId, setEditInvoiceCustomId] = useState("");
   const [editInvoicePatientName, setEditInvoicePatientName] = useState("");
   const [editInvoiceDoctor, setEditInvoiceDoctor] = useState("");
   const [editInvoiceTreatment, setEditInvoiceTreatment] = useState("");
@@ -2235,6 +2236,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
 
   const handleEditInvoice = (inv: InvoiceItem) => {
     setEditingInvoice(inv);
+    setEditInvoiceCustomId(inv.id || "");
     setEditInvoicePatientName(inv.patientName || "");
     setEditInvoiceDoctor(inv.doctor || "");
     setEditInvoiceTreatment(inv.treatment || "");
@@ -2252,7 +2254,36 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     if (!editingInvoice) return;
 
     const invoiceUuid = editingInvoice.uuid;
-    const invoiceId = editingInvoice.id;
+    const oldInvoiceId = editingInvoice.id;
+    const newInvoiceId = editInvoiceCustomId.trim() || oldInvoiceId;
+
+    if (!newInvoiceId) {
+      showToast("Invoice ID cannot be empty.", "error");
+      return;
+    }
+
+    // Validate if doctor changed the Invoice ID
+    if (newInvoiceId.toLowerCase() !== oldInvoiceId.toLowerCase()) {
+      const duplicateLocal = invoices.some(
+        inv => inv.id.toLowerCase() === newInvoiceId.toLowerCase() && (inv.uuid ? inv.uuid !== invoiceUuid : inv.id !== oldInvoiceId)
+      );
+      if (duplicateLocal) {
+        showToast(`Invoice ID "${newInvoiceId}" already exists. Please choose a unique Invoice ID.`, "error");
+        return;
+      }
+
+      const { data: dbDup } = await supabase
+        .from("invoices")
+        .select("id")
+        .ilike("invoice_id", newInvoiceId)
+        .neq("id", invoiceUuid || "00000000-0000-0000-0000-000000000000")
+        .maybeSingle();
+
+      if (dbDup) {
+        showToast(`Invoice ID "${newInvoiceId}" is already used by another invoice in the database.`, "error");
+        return;
+      }
+    }
 
     setSavingInvoice(true);
 
@@ -2278,6 +2309,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     const dbPatId = patRecord ? (patRecord.uuid || patRecord.id) : undefined;
 
     const updateFields: any = {
+      invoice_id: newInvoiceId,
       patient_name: editInvoicePatientName.trim(),
       doctor: editInvoiceDoctor.trim(),
       treatment: editInvoiceTreatment.trim(),
@@ -2299,6 +2331,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       await supabase
         .from("invoices")
         .update({
+          invoice_id: newInvoiceId,
           subtotal: updatedSubtotal,
           discount: updatedDiscount,
           tax: updatedTax,
@@ -2311,6 +2344,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       await supabase
         .from("invoices")
         .update({
+          invoice_id: newInvoiceId,
           subtotal: updatedSubtotal,
           discount: updatedDiscount,
           tax: updatedTax,
@@ -2318,7 +2352,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
           status: finalStatus,
           updated_at: new Date().toISOString()
         })
-        .eq("invoice_id", invoiceId);
+        .eq("invoice_id", oldInvoiceId);
     }
 
     // 2. Update legacy 'billing' table
@@ -2327,7 +2361,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     if (invoiceUuid) {
       query = query.eq("id", invoiceUuid);
     } else {
-      query = query.eq("invoice_id", invoiceId);
+      query = query.eq("invoice_id", oldInvoiceId);
     }
 
     const { data: updatedDb, error: updateErr } = await query.select().single();
@@ -2341,9 +2375,10 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     }
 
     setInvoices(prev => prev.map(inv => {
-      if ((invoiceUuid && inv.uuid === invoiceUuid) || inv.id === invoiceId) {
+      if ((invoiceUuid && inv.uuid === invoiceUuid) || inv.id === oldInvoiceId) {
         return {
           ...inv,
+          id: newInvoiceId,
           patientName: updatedDb?.patient_name || editInvoicePatientName.trim(),
           doctor: updatedDb?.doctor || editInvoiceDoctor.trim(),
           treatment: updatedDb?.treatment || editInvoiceTreatment.trim(),
@@ -2360,7 +2395,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     }));
 
     setEditingInvoice(null);
-    showToast(`Billing record ${invoiceId} updated successfully.`, "success");
+    showToast(`Billing record ${newInvoiceId} updated successfully.`, "success");
   };
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
   const [profileSubTab, setProfileSubTab] = useState("Case Sheet");
@@ -3047,6 +3082,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
   const [invDiscountType, setInvDiscountType] = useState<"percentage" | "fixed">("percentage");
   const [invTax, setInvTax] = useState("0");
   const [invPaid, setInvPaid] = useState("0");
+  const [invoiceCustomId, setInvoiceCustomId] = useState("");
   const [isCreateInvoiceModalOpen, setIsCreateInvoiceModalOpen] = useState(false);
 
   const getPatientBalance = (patientId: string): number => {
@@ -4357,6 +4393,33 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       return;
     }
 
+    const trimmedInvoiceId = invoiceCustomId.trim();
+    if (!trimmedInvoiceId) {
+      showToast("Invoice ID is required. Please enter a valid Invoice ID.", "error");
+      return;
+    }
+
+    // Check duplicate Invoice ID in local state
+    const isDuplicateLocal = invoices.some(
+      inv => inv.id.toLowerCase() === trimmedInvoiceId.toLowerCase()
+    );
+    if (isDuplicateLocal) {
+      showToast(`Invoice ID "${trimmedInvoiceId}" already exists. Please choose a unique Invoice ID.`, "error");
+      return;
+    }
+
+    // Check duplicate Invoice ID in database
+    const { data: dbDupInv } = await supabase
+      .from("invoices")
+      .select("id")
+      .ilike("invoice_id", trimmedInvoiceId)
+      .maybeSingle();
+
+    if (dbDupInv) {
+      showToast(`Invoice ID "${trimmedInvoiceId}" is already registered in the database. Please enter a unique Invoice ID.`, "error");
+      return;
+    }
+
     // Filter valid treatment rows
     const validRows = invoiceRows
       .map(r => {
@@ -4394,9 +4457,8 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     const paid = Math.min(total, Math.max(0, Number(invPaid) || 0));
     const pending = Math.max(0, total - paid);
 
-    const newInvId = `INV-${Date.now().toString().slice(-4)}`;
     const newInvoice: InvoiceItem = {
-      id: newInvId,
+      id: trimmedInvoiceId,
       patientId: patientItem.id,
       patientName: patientItem.name,
       doctor: doctors[0]?.name || "Dr. Suvarna Raju. P",
@@ -4424,12 +4486,12 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       uuid: savedUuid
     };
 
-    setInvoices(prev => [confirmedInvoice, ...prev.filter(inv => inv.id !== newInvId)]);
+    setInvoices(prev => [confirmedInvoice, ...prev.filter(inv => inv.id !== trimmedInvoiceId)]);
 
     setActivities(prev => [{
       id: `act-${Date.now()}`,
       type: "Billing",
-      msg: `Invoice ${newInvId} generated for ${patientItem.name} (${confirmedInvoice.status}) with ${validRows.length} treatments.`,
+      msg: `Invoice ${trimmedInvoiceId} generated for ${patientItem.name} (${confirmedInvoice.status}) with ${validRows.length} treatments.`,
       time: "Just now"
     }, ...prev]);
 
@@ -4440,9 +4502,10 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     setInvDiscount("0");
     setInvTax("0");
     setInvPaid("0");
+    setInvoiceCustomId("");
     setIsCreateInvoiceModalOpen(false);
 
-    showToast(`Invoice ${newInvId} saved successfully with ${validRows.length} treatments.`, "success");
+    showToast(`Invoice ${trimmedInvoiceId} saved successfully with ${validRows.length} treatments.`, "success");
     setLastGeneratedReceipt(confirmedInvoice);
   };
 
@@ -6768,38 +6831,13 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         setPayTaxPercent(0);
         setPayCustomItems([]);
       } else {
-        // Create quick invoice if not already created
-        const invoiceNum = `INV-${1000 + invoices.length + 1}`;
-        const treatmentCost = 0;
-        const invoiceItems = [{ description: `${app.treatment} Fee`, amount: treatmentCost }];
-        const sub = treatmentCost;
-        const tot = sub;
-
-        const newInvoice: InvoiceItem = {
-          id: invoiceNum,
-          patientId: app.patientId,
-          patientName: app.patientName,
-          doctor: app.doctor,
-          treatment: app.treatment,
-          items: invoiceItems,
-          discount: 0,
-          tax: 0,
-          subtotal: sub,
-          total: tot,
-          paidAmount: 0,
-          status: "Pending",
-          paymentDate: "",
-          paymentLogs: []
-        };
-        setInvoices(prev => [newInvoice, ...prev]);
-        await insertBillingRecord(newInvoice);
-        setSelectedInvoiceForPayment(newInvoice);
-        setPayCash(0);
-        setPayUpi(0);
-        setPayCard(0);
-        setPayDiscountPercent(0);
-        setPayTaxPercent(0);
-        setPayCustomItems([]);
+        setInvoiceFormPatientId(app.patientId);
+        setInvoiceRows([{ id: `row-${Date.now()}`, treatment: app.treatment || "Consultation", quantity: 1, unitPrice: 0 }]);
+        setInvDiscount("0");
+        setInvDiscountType("percentage");
+        setInvPaid("0");
+        setInvoiceCustomId("");
+        setIsCreateInvoiceModalOpen(true);
       }
     }
     if (selectedSlotData && selectedSlotData.appointment?.id === apptId) {
@@ -7123,34 +7161,14 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       }
     };
 
-    const handleQuickGenerateBill = async (pat: Patient) => {
-      const invoiceNum = `INV-${1000 + invoices.length + 1}`;
-      const newInvoice: InvoiceItem = {
-        id: invoiceNum,
-        patientId: pat.id,
-        patientName: pat.name,
-        doctor: "Dr. Sharma",
-        treatment: "Consultation",
-        items: [{ description: "Consultation Fee", amount: 500 }],
-        discount: 0,
-        tax: 0,
-        subtotal: 500,
-        total: 500,
-        paidAmount: 0,
-        status: "Pending",
-        paymentDate: "",
-        paymentLogs: []
-      };
-      setInvoices(prev => [newInvoice, ...prev]);
-      await insertBillingRecord(newInvoice);
-      setSelectedInvoiceForPayment(newInvoice);
-      setPayCash(0);
-      setPayUpi(0);
-      setPayCard(0);
-      setPayDiscountPercent(0);
-      setPayTaxPercent(0);
-      setPayCustomItems([]);
-      pushActivity("Billing", `Invoice ${invoiceNum} generated for ${pat.name}.`);
+    const handleQuickGenerateBill = (pat: Patient) => {
+      setInvoiceFormPatientId(pat.id);
+      setInvoiceRows([{ id: `row-${Date.now()}`, treatment: "Consultation", quantity: 1, unitPrice: 500 }]);
+      setInvDiscount("0");
+      setInvDiscountType("percentage");
+      setInvPaid("0");
+      setInvoiceCustomId("");
+      setIsCreateInvoiceModalOpen(true);
     };
 
     return (
@@ -10653,6 +10671,20 @@ ${clinicName}`;
                     </div>
                   </div>
 
+                  {/* Manual Invoice ID */}
+                  <div className="max-w-xs space-y-1">
+                    <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Invoice ID <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      placeholder="e.g. INV-19001, SMK-2026-001"
+                      value={invoiceCustomId}
+                      onChange={e => setInvoiceCustomId(e.target.value)}
+                      required
+                      className="h-9 text-xs font-semibold uppercase"
+                    />
+                  </div>
+
                   {/* Treatments Line Items Table */}
                   <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-x-auto scrollbar-thin">
                     <table className="w-full min-w-[580px] text-left text-xs">
@@ -12713,23 +12745,16 @@ ${clinicName}`;
             <div className="pt-4 border-t border-slate-100 dark:border-slate-800/80">
               <Button
                 onClick={() => {
-                  const inv: InvoiceItem = {
-                    id: `INV-${Date.now().toString().slice(-4)}`,
-                    patientId: tr.patient,
-                    patientName: tr.patient,
-                    doctor: tr.doctor,
-                    treatment: tr.name,
-                    items: [{ description: tr.name, amount: cost }],
-                    discount: 0,
-                    tax: 0,
-                    subtotal: cost,
-                    total: cost,
-                    paidAmount: paid,
-                    status: remaining === 0 ? "Paid" : "Partially Paid",
-                    paymentDate: remaining === 0 ? getTodayUiDate() : "",
-                    paymentLogs: []
-                  };
-                  setSelectedInvoiceForPayment(inv);
+                  const patientObj = patients.find(p => p.name === tr.patient || p.id === tr.patient);
+                  if (patientObj) {
+                    setInvoiceFormPatientId(patientObj.id);
+                  }
+                  setInvoiceRows([{ id: `row-${Date.now()}`, treatment: tr.name, quantity: 1, unitPrice: cost }]);
+                  setInvDiscount("0");
+                  setInvDiscountType("percentage");
+                  setInvPaid(String(paid));
+                  setInvoiceCustomId("");
+                  setIsCreateInvoiceModalOpen(true);
                 }}
                 className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs h-11 rounded-xl flex items-center justify-center gap-2 shadow-xs cursor-pointer"
               >
@@ -12828,6 +12853,7 @@ ${clinicName}`;
                 setInvDiscount("0");
                 setInvDiscountType("percentage");
                 setInvPaid("0");
+                setInvoiceCustomId("");
                 setIsCreateInvoiceModalOpen(true);
               }}
               className="h-9 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
@@ -16131,6 +16157,11 @@ ${clinicName}`;
                     if (patients.length > 0) {
                       setInvoiceFormPatientId(patients[0].id);
                     }
+                    setInvoiceRows([{ id: `row-${Date.now()}`, treatment: "", quantity: 1, unitPrice: 0 }]);
+                    setInvDiscount("0");
+                    setInvDiscountType("percentage");
+                    setInvPaid("0");
+                    setInvoiceCustomId("");
                     setIsCreateInvoiceModalOpen(true);
                     setQuickAddOpen(false);
                   }}
@@ -16576,24 +16607,39 @@ ${clinicName}`;
             </div>
 
             <form onSubmit={(e) => handleSaveInvoice(e, invoiceFormPatientId)} className="p-5 space-y-4 max-h-[80vh] overflow-y-auto scrollbar-thin">
-              {/* Patient Selector */}
-              <div>
-                <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Select Patient <span className="text-red-500">*</span>
-                </Label>
-                <select
-                  value={invoiceFormPatientId}
-                  onChange={e => setInvoiceFormPatientId(e.target.value)}
-                  className="w-full h-9 mt-1 px-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-semibold focus:outline-none"
-                  required
-                >
-                  <option value="">-- Choose Patient --</option>
-                  {patients.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.id} - {p.name} ({p.age} Yrs / {p.gender})
-                    </option>
-                  ))}
-                </select>
+              {/* Patient Selector and Manual Invoice ID */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Select Patient <span className="text-red-500">*</span>
+                  </Label>
+                  <select
+                    value={invoiceFormPatientId}
+                    onChange={e => setInvoiceFormPatientId(e.target.value)}
+                    className="w-full h-9 mt-1 px-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-semibold focus:outline-none"
+                    required
+                  >
+                    <option value="">-- Choose Patient --</option>
+                    {patients.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.id} - {p.name} ({p.age} Yrs / {p.gender})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Invoice ID <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    placeholder="e.g. INV-19001, SMK-2026-001"
+                    value={invoiceCustomId}
+                    onChange={e => setInvoiceCustomId(e.target.value)}
+                    required
+                    className="h-9 mt-1 text-xs font-semibold uppercase"
+                  />
+                </div>
               </div>
 
               {/* Treatments Table */}
@@ -17806,6 +17852,24 @@ ${clinicName}`;
             </div>
 
             <form onSubmit={handleSaveEditInvoice} className="space-y-4 text-xs font-semibold">
+              {/* Row 0: Invoice ID */}
+              <div className="space-y-1">
+                <label className="text-slate-700 dark:text-slate-300 block font-medium">
+                  Invoice ID <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  type="text"
+                  value={editInvoiceCustomId}
+                  onChange={(e) => setEditInvoiceCustomId(e.target.value)}
+                  required
+                  placeholder="e.g. INV-19001, SMK-2026-001"
+                  className="text-[13px] uppercase font-semibold"
+                />
+                <p className="text-[10px] text-slate-400 font-normal">
+                  Preserve current ID or enter a new unique Invoice ID.
+                </p>
+              </div>
+
               {/* Row 1: Patient Name & Doctor */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
