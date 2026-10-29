@@ -125,7 +125,32 @@ serve(async (req: Request) => {
       );
     }
 
-    // 5. Record Persistent Backup Entry in backup_history Table First
+    // 5. Concurrency Guard: Prevent multiple concurrent backups
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const { data: activeBackups } = await userSupabase
+      .from("backup_history")
+      .select("id")
+      .in("status", ["pending", "triggered"])
+      .gte("created_at", tenMinutesAgo)
+      .limit(1);
+
+    if (activeBackups && activeBackups.length > 0) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "A database backup is already in progress. Please wait for it to complete.",
+        }),
+        {
+          status: 409,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+    }
+
+    // 6. Record Persistent Backup Entry in backup_history Table First
     const { data: historyRow, error: historyErr } = await userSupabase
       .from("backup_history")
       .insert({ status: "pending" })

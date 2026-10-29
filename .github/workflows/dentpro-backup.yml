@@ -1,9 +1,6 @@
 name: DentPro OS Database Backup
 
 on:
-  schedule:
-    # Daily backup at 18:30 UTC = 00:00 (Midnight) IST (Asia/Kolkata), outside clinic working hours
-    - cron: '30 18 * * *'
   workflow_dispatch:
     inputs:
       backup_id:
@@ -357,6 +354,8 @@ jobs:
                           timeout=30,
                       )
                       print(f"Callback response: HTTP {cb_resp.status_code}")
+                      if cb_resp.status_code != 200:
+                          print(f"Warning: backup-callback response body: {cb_resp.text}", file=sys.stderr)
                   except Exception as cb_err:
                       print(f"Warning: Failed to reach backup-callback: {cb_err}", file=sys.stderr)
 

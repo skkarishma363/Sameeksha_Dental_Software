@@ -71,6 +71,7 @@ import {
   Package,
   Boxes,
   AlertTriangle,
+  AlertCircle,
   ExternalLink,
   Eye
 } from "lucide-react";
@@ -309,6 +310,8 @@ interface BackupHistoryItem {
   size: string;
   status: string;
   fileName?: string;
+  createdAt?: string;
+  completedAt?: string;
 }
 
 interface TreatmentItem {
@@ -1297,11 +1300,6 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       }
 
       if (dbPatients) {
-        if (dbPatients.length === 0) {
-          await seedMockPatients();
-          // Re-fetch data statefully after insert completion
-          return fetchClinicData();
-        }
 
         const mappedPatients: Patient[] = dbPatients.map(p => {
           // Map files from public.patient_files
@@ -3182,6 +3180,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
 
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [backupHistory, setBackupHistory] = useState<BackupHistoryItem[]>([]);
+  const [activeBackupId, setActiveBackupId] = useState<string | null>(null);
 
   const fetchBackupHistory = React.useCallback(async () => {
     try {
@@ -3193,8 +3192,10 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
 
       if (!error && data) {
         const formattedItems: BackupHistoryItem[] = data.map((row: any) => {
-          const dateStr = formatDate(row.created_at);
-          const timeStr = formatTime(row.created_at);
+          // Use completed_at for actual completion time; fallback to created_at
+          const displayTimestamp = row.completed_at || row.created_at;
+          const dateStr = formatDate(displayTimestamp);
+          const timeStr = formatTime(displayTimestamp);
 
           let formattedSize = "--";
           if (row.backup_size !== null && row.backup_size !== undefined && row.backup_size !== "") {
@@ -3209,9 +3210,22 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
             }
           }
 
-          const statusStr = row.status
-            ? row.status.charAt(0).toUpperCase() + row.status.slice(1)
-            : "Triggered";
+          const rawStatus = (row.status || "").toLowerCase();
+          let statusStr = "Ready";
+          if (rawStatus === "completed") {
+            statusStr = "Completed";
+          } else if (rawStatus === "failed") {
+            statusStr = "Failed";
+          } else if (rawStatus === "pending" || rawStatus === "triggered") {
+            statusStr = "In Progress";
+          } else if (row.status) {
+            statusStr = row.status.charAt(0).toUpperCase() + row.status.slice(1);
+          }
+
+          let displayFileName = row.file_name || undefined;
+          if (!displayFileName && (rawStatus === "pending" || rawStatus === "triggered")) {
+            displayFileName = "Creating encrypted archive...";
+          }
 
           return {
             id: row.id,
@@ -3219,20 +3233,76 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
             time: timeStr,
             size: formattedSize,
             status: statusStr,
-            fileName: row.file_name || undefined,
+            fileName: displayFileName,
+            createdAt: row.created_at,
+            completedAt: row.completed_at,
           };
         });
 
         setBackupHistory(formattedItems);
+        return formattedItems;
       }
     } catch (err) {
       console.error("Error fetching backup history:", err);
     }
+    return [];
   }, []);
 
+  // Initial fetch on mount & resume polling if a recent in-progress backup is detected
   useEffect(() => {
-    fetchBackupHistory();
+    fetchBackupHistory().then(items => {
+      if (items && items.length > 0) {
+        const latest = items[0];
+        if (latest.status === "In Progress") {
+          const createdTime = latest.createdAt ? new Date(latest.createdAt).getTime() : 0;
+          // Only resume tracking if initiated within the last 10 minutes
+          if (Date.now() - createdTime < 10 * 60 * 1000) {
+            setIsBackingUp(true);
+            setActiveBackupId(latest.id);
+          }
+        }
+      }
+    });
   }, [fetchBackupHistory]);
+
+  // Poll backup status when an active backup is running
+  useEffect(() => {
+    if (!activeBackupId) return;
+
+    let pollCount = 0;
+    const maxPolls = 60; // 60 * 3s = 180s (3 minutes)
+
+    const intervalId = setInterval(async () => {
+      pollCount++;
+      const items = await fetchBackupHistory();
+      const current = items?.find(i => i.id === activeBackupId) || items?.[0];
+
+      if (current) {
+        if (current.status === "Completed") {
+          showToast("Backup completed successfully! Encrypted archive verified in Google Drive.", "success");
+          setIsBackingUp(false);
+          setActiveBackupId(null);
+          clearInterval(intervalId);
+          return;
+        } else if (current.status === "Failed") {
+          showToast("Backup failed. Please verify storage permissions and Google Drive credentials.", "error");
+          setIsBackingUp(false);
+          setActiveBackupId(null);
+          clearInterval(intervalId);
+          return;
+        }
+      }
+
+      if (pollCount >= maxPolls) {
+        showToast("Backup operation is taking longer than expected. Please check history shortly.", "error");
+        setIsBackingUp(false);
+        setActiveBackupId(null);
+        clearInterval(intervalId);
+      }
+    }, 3000);
+
+    return () => clearInterval(intervalId);
+  }, [activeBackupId, fetchBackupHistory]);
 
   useEffect(() => {
     try {
@@ -14737,9 +14807,12 @@ ${clinicName}`;
       setDeleteStaffConfirm(null);
     };
 
-    // Backup Action
+    // Backup Action (Strict manual execution only, concurrency guarded)
     const handleBackupNow = async () => {
-      if (isBackingUp) return;
+      if (isBackingUp || backupHistory[0]?.status === "In Progress") {
+        showToast("A database backup is already in progress. Please wait for it to complete.", "error");
+        return;
+      }
       setIsBackingUp(true);
 
       try {
@@ -14751,14 +14824,22 @@ ${clinicName}`;
         if (error || !data?.success) {
           const errorMsg = data?.error || error?.message || "Unable to start backup. Please try again.";
           showToast(errorMsg, "error");
+          setIsBackingUp(false);
         } else {
-          showToast("Backup started successfully. Encrypted upload in progress...", "success");
+          showToast("Backup initiated. Creating PostgreSQL dump, encrypting, and uploading to Google Drive...", "success");
           await fetchBackupHistory();
+          if (data?.backup_id) {
+            setActiveBackupId(data.backup_id);
+          } else {
+            const updated = await fetchBackupHistory();
+            if (updated && updated[0]) {
+              setActiveBackupId(updated[0].id);
+            }
+          }
         }
       } catch (err: any) {
         const errorMsg = err?.message || "Unable to start backup. Please try again.";
         showToast(errorMsg, "error");
-      } finally {
         setIsBackingUp(false);
       }
     };
@@ -15022,9 +15103,23 @@ ${clinicName}`;
                   <div>
                     <div className="flex items-center gap-2">
                       <h2 className="text-[18px] font-semibold text-slate-900 dark:text-white tracking-tight">Backup</h2>
-                      <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 dark:bg-emerald-955/40 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/40 rounded-full font-medium text-[11px]">
-                        Up to date
-                      </span>
+                      {isBackingUp || backupHistory[0]?.status === "In Progress" ? (
+                        <span className="px-2.5 py-0.5 bg-amber-50 text-amber-700 dark:bg-amber-955/40 dark:text-amber-400 border border-amber-200 dark:border-amber-900/40 rounded-full font-medium text-[11px] flex items-center gap-1.5">
+                          <Loader2 className="h-3 w-3 animate-spin" /> In Progress
+                        </span>
+                      ) : backupHistory[0]?.status === "Completed" ? (
+                        <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 dark:bg-emerald-955/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/40 rounded-full font-medium text-[11px] flex items-center gap-1">
+                          <CheckCircle2 className="h-3 w-3" /> Up to date
+                        </span>
+                      ) : backupHistory[0]?.status === "Failed" ? (
+                        <span className="px-2.5 py-0.5 bg-rose-50 text-rose-700 dark:bg-rose-955/40 dark:text-rose-400 border border-rose-200 dark:border-rose-900/40 rounded-full font-medium text-[11px] flex items-center gap-1">
+                          <AlertCircle className="h-3 w-3" /> Last Backup Failed
+                        </span>
+                      ) : (
+                        <span className="px-2.5 py-0.5 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-full font-medium text-[11px]">
+                          Ready
+                        </span>
+                      )}
                     </div>
                     <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-0.5">Protect your clinic data with secure backups and restore options.</p>
                   </div>
@@ -15032,12 +15127,12 @@ ${clinicName}`;
                   {/* Primary Action Button */}
                   <Button
                     onClick={handleBackupNow}
-                    disabled={isBackingUp}
+                    disabled={isBackingUp || backupHistory[0]?.status === "In Progress"}
                     className="bg-blue-600 hover:bg-blue-500 text-white font-semibold h-10 px-5 rounded-xl text-xs flex items-center gap-2 cursor-pointer shadow-xs shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {isBackingUp ? (
+                    {isBackingUp || backupHistory[0]?.status === "In Progress" ? (
                       <>
-                        <Loader2 className="h-4 w-4 animate-spin" /> Starting Backup...
+                        <Loader2 className="h-4 w-4 animate-spin" /> In Progress...
                       </>
                     ) : (
                       <>
@@ -15050,26 +15145,33 @@ ${clinicName}`;
                 {/* Backup Information Stats */}
                 {(() => {
                   const latestBackup = backupHistory[0];
-                  const latestStatusLower = latestBackup?.status?.toLowerCase() || "";
+                  const latestStatus = latestBackup?.status || "";
+                  const isInProgress = isBackingUp || latestStatus === "In Progress";
+                  const isCompleted = latestStatus === "Completed";
+                  const isFailed = latestStatus === "Failed";
 
                   let displayLastBackup = "--";
                   let displayBackupSize = "--";
-                  let displayBackupStatus = "--";
+                  let displayBackupStatus = "Ready";
                   let statusTextColor = "text-slate-900 dark:text-white";
 
                   if (latestBackup) {
-                    displayLastBackup = `${latestBackup.date} • ${latestBackup.time}`;
+                    if (latestBackup.completedAt) {
+                      displayLastBackup = `${formatDate(latestBackup.completedAt)} • ${formatTime(latestBackup.completedAt)}`;
+                    } else {
+                      displayLastBackup = `${latestBackup.date} • ${latestBackup.time}`;
+                    }
 
-                    if (latestStatusLower === "triggered" || latestStatusLower === "pending") {
-                      displayBackupStatus = "Triggered / In Progress";
+                    if (isInProgress) {
+                      displayBackupStatus = "Backup in Progress";
                       displayBackupSize = "--";
                       statusTextColor = "text-amber-600 dark:text-amber-400";
-                    } else if (latestStatusLower === "completed") {
-                      displayBackupStatus = "Encrypted & Uploaded";
+                    } else if (isCompleted) {
+                      displayBackupStatus = "Completed & Uploaded";
                       displayBackupSize = latestBackup.size || "--";
                       statusTextColor = "text-emerald-600 dark:text-emerald-400";
-                    } else if (latestStatusLower === "failed") {
-                      displayBackupStatus = "Failed";
+                    } else if (isFailed) {
+                      displayBackupStatus = "Backup Failed";
                       displayBackupSize = "--";
                       statusTextColor = "text-rose-600 dark:text-rose-400";
                     } else {
@@ -15085,12 +15187,14 @@ ${clinicName}`;
                         <div className="p-3.5 border border-slate-100 dark:border-slate-800/80 rounded-xl bg-slate-50/50 dark:bg-slate-900/40">
                           <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500 block">Last Backup</span>
                           <span className="text-[13px] font-semibold text-slate-900 dark:text-white block mt-1 truncate" title={displayLastBackup}>{displayLastBackup}</span>
-                          <span className="text-[11px] text-slate-400 dark:text-slate-500 block mt-0.5">{displayBackupSize !== "--" ? `Size: ${displayBackupSize}` : "Awaiting run"}</span>
+                          <span className="text-[11px] text-slate-400 dark:text-slate-500 block mt-0.5">
+                            {isInProgress ? "In progress..." : isCompleted ? `Size: ${displayBackupSize}` : isFailed ? "Failed attempt" : "Awaiting run"}
+                          </span>
                         </div>
                         <div className="p-3.5 border border-slate-100 dark:border-slate-800/80 rounded-xl bg-slate-50/50 dark:bg-slate-900/40">
                           <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500 block">Next Scheduled Backup</span>
-                          <span className="text-[13px] font-semibold text-slate-900 dark:text-white block mt-1">12:00 AM IST (Daily)</span>
-                          <span className="text-[11px] text-slate-400 dark:text-slate-500 block mt-0.5">Asia/Kolkata (Nightly)</span>
+                          <span className="text-[13px] font-semibold text-slate-900 dark:text-white block mt-1">Manual backups only</span>
+                          <span className="text-[11px] text-slate-400 dark:text-slate-500 block mt-0.5">Automatic scheduling disabled</span>
                         </div>
                         <div className="p-3.5 border border-slate-100 dark:border-slate-800/80 rounded-xl bg-slate-50/50 dark:bg-slate-900/40">
                           <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500 block">Storage Destination</span>
@@ -15130,23 +15234,27 @@ ${clinicName}`;
                           </tr>
                         ) : (
                           backupHistory.map(item => {
-                            const statusLower = item.status?.toLowerCase() || "";
-                            const isPending = statusLower === "triggered" || statusLower === "pending";
-                            const isFailed = statusLower === "failed";
+                            const isPending = item.status === "In Progress";
+                            const isFailed = item.status === "Failed";
+                            const isCompleted = item.status === "Completed";
                             const badgeStyle = isPending
-                              ? "bg-amber-50 text-amber-700 dark:bg-amber-955/40 dark:text-amber-400 border-amber-100 dark:border-amber-900/40"
+                              ? "bg-amber-50 text-amber-700 dark:bg-amber-955/40 dark:text-amber-400 border-amber-200 dark:border-amber-900/40"
                               : isFailed
-                              ? "bg-rose-50 text-rose-700 dark:bg-rose-955/40 dark:text-rose-400 border-rose-100 dark:border-rose-900/40"
-                              : "bg-emerald-50 text-emerald-700 dark:bg-emerald-955/40 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/40";
-                            const badgeText = isPending ? "Triggered" : isFailed ? "Failed" : "Encrypted";
+                              ? "bg-rose-50 text-rose-700 dark:bg-rose-955/40 dark:text-rose-400 border-rose-200 dark:border-rose-900/40"
+                              : "bg-emerald-50 text-emerald-700 dark:bg-emerald-955/40 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/40";
+                            const badgeText = isPending ? "In Progress" : isFailed ? "Failed" : "Completed";
+
+                            const displayTimestamp = item.completedAt
+                              ? `${formatDate(item.completedAt)} • ${formatTime(item.completedAt)}`
+                              : `${item.date} • ${item.time}`;
 
                             return (
                               <tr key={item.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/40">
                                 <td className="py-3 px-4 font-medium text-slate-900 dark:text-white whitespace-nowrap">
-                                  {item.date} • {item.time}
+                                  {displayTimestamp}
                                 </td>
-                                <td className="py-3 px-4 text-slate-600 dark:text-slate-400 font-mono text-[12px] truncate max-w-[240px]" title={item.fileName || "Pending upload"}>
-                                  {item.fileName || "--"}
+                                <td className="py-3 px-4 text-slate-600 dark:text-slate-400 font-mono text-[12px] truncate max-w-[240px]" title={item.fileName || (isPending ? "Generating..." : "--")}>
+                                  {item.fileName || (isPending ? "Creating encrypted archive..." : "--")}
                                 </td>
                                 <td className="py-3 px-4 text-slate-600 dark:text-slate-400 whitespace-nowrap">{item.size}</td>
                                 <td className="py-3 px-4 text-slate-600 dark:text-slate-400 whitespace-nowrap">Google Drive</td>
