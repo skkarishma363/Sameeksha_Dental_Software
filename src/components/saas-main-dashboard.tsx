@@ -330,6 +330,11 @@ interface TreatmentItem {
   treatmentPlan?: string;
   completedVisits?: number;
   totalVisits?: number;
+  patientId?: string;
+  createdAt?: string;
+  teeth?: number[];
+  associatedRecords?: TreatmentItem[];
+  recordIds?: string[];
 }
 
 interface ActivityItem {
@@ -565,6 +570,114 @@ export function numberToWords(amount: number): string {
   }
 
   return `${words.trim()} RUPEES ONLY`;
+}
+
+export interface GroupedTreatmentItem extends TreatmentItem {
+  teeth: number[];
+  associatedRecords: TreatmentItem[];
+  recordIds: string[];
+}
+
+export function getGroupedTreatments(
+  rawTreatments: TreatmentItem[],
+  invoicesList: InvoiceItem[] = []
+): GroupedTreatmentItem[] {
+  if (!rawTreatments || rawTreatments.length === 0) return [];
+
+  // Group records belonging to the same patient and identical treatment types
+  // within the same treatment plan or treatment episode.
+  const episodeMap = new Map<string, TreatmentItem[]>();
+
+  rawTreatments.forEach((tr) => {
+    // 1. Patient identifier (Rule 1 & Rule 8: Never group across different patients)
+    const patKey = (tr.patientId || tr.patient || "unknown-patient").trim().toLowerCase();
+
+    // 2. Treatment type / procedure (Rule 6: Never combine different treatment types)
+    const nameKey = (tr.name || "consultation").trim().toLowerCase();
+
+    // 3. Treatment episode identification (Rule 2 & Rule 7: Preserve separate episodes)
+    const dateKey = (tr.date || "").trim();
+    const docKey = (tr.doctor || "").trim().toLowerCase();
+    const planKey = (tr.treatmentPlan || "").trim().toLowerCase();
+
+    // Key preserves separate treatment episodes when performed at different times or under different plans
+    const groupKey = `${patKey}__${nameKey}__${planKey || dateKey || "nodate"}__${docKey || "nodoc"}`;
+
+    if (!episodeMap.has(groupKey)) {
+      episodeMap.set(groupKey, []);
+    }
+    episodeMap.get(groupKey)!.push(tr);
+  });
+
+  const grouped: GroupedTreatmentItem[] = [];
+
+  episodeMap.forEach((records) => {
+    const primary = records[0];
+
+    // Collect all associated tooth numbers and remove duplicates without deleting underlying clinical records
+    const toothSet = new Set<number>();
+    records.forEach(r => {
+      if (typeof r.tooth === "number" && !isNaN(r.tooth) && r.tooth > 0) {
+        toothSet.add(r.tooth);
+      }
+    });
+    const uniqueTeeth = Array.from(toothSet).sort((a, b) => a - b);
+
+    // Determine overall status across all teeth
+    const hasInProgress = records.some(r => r.stage === "In Progress");
+    const hasCompleted = records.some(r => r.stage === "Completed");
+    const allCompleted = records.every(r => r.stage === "Completed");
+    const overallStage: "In Progress" | "Completed" | "Planned" = 
+      allCompleted ? "Completed" :
+      (hasInProgress || hasCompleted) ? "In Progress" :
+      "Planned";
+
+    // Calculate correct estimated cost according to existing billing and treatment-pricing rules
+    const matchingInvoice = invoicesList.find(inv =>
+      (inv.patientId === primary.patient || inv.patientName?.toLowerCase() === primary.patient?.toLowerCase()) &&
+      inv.treatment?.toLowerCase().includes(primary.name.toLowerCase())
+    );
+
+    let finalCost = 0;
+    if (matchingInvoice && typeof matchingInvoice.total === "number" && matchingInvoice.total > 0) {
+      finalCost = matchingInvoice.total;
+    } else {
+      const costs = records.map(r => Number(r.cost) || 0).filter(c => c > 0);
+      if (costs.length > 0) {
+        const firstCost = costs[0];
+        const allSameCost = costs.every(c => c === firstCost);
+
+        const nameLower = primary.name.toLowerCase();
+        const isFullMouthOrPlan = nameLower.includes("scaling") || 
+                                 nameLower.includes("clean") || 
+                                 nameLower.includes("polishing") || 
+                                 nameLower.includes("consultation") ||
+                                 nameLower.includes("orthodontic") ||
+                                 nameLower.includes("bleach") ||
+                                 nameLower.includes("whitening") ||
+                                 records.length >= 28;
+
+        if (allSameCost) {
+          finalCost = firstCost;
+        } else {
+          finalCost = costs.reduce((acc, c) => acc + c, 0);
+        }
+      }
+    }
+
+    const recordIds = records.map(r => r.id);
+
+    grouped.push({
+      ...primary,
+      stage: overallStage,
+      cost: finalCost,
+      teeth: uniqueTeeth,
+      associatedRecords: records,
+      recordIds: recordIds
+    });
+  });
+
+  return grouped;
 }
 
 export interface TreatmentVisitNode {
@@ -1630,7 +1743,10 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
           tooth: t.tooth_number || undefined,
           cost: t.cost !== null && t.cost !== undefined ? Number(t.cost) : undefined,
           diagnosis: t.diagnosis || undefined,
-          date: t.treatment_date ? convertToUiDate(t.treatment_date) : (t.created_at ? convertToUiDate(t.created_at.split("T")[0]) : undefined)
+          date: t.treatment_date ? convertToUiDate(t.treatment_date) : (t.created_at ? convertToUiDate(t.created_at.split("T")[0]) : undefined),
+          patientId: t.patient_id,
+          createdAt: t.created_at,
+          treatmentPlan: (t as any).treatment_plan || undefined
         };
       });
       setTreatments(mappedTr);
@@ -2231,15 +2347,22 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       ? `Phase: ${selectedPhaseStage}${existingNotesClean ? `\n${existingNotesClean}` : ""}`
       : existingNotesClean;
 
-    const { data: updatedDb, error: updateErr } = await supabase
-      .from("treatments")
-      .update({
-        stage: dbStage,
-        notes: updatedNotes
-      })
-      .eq("id", editingPhaseTreatment.id)
-      .select()
-      .single();
+    const targetIds = (editingPhaseTreatment.recordIds && editingPhaseTreatment.recordIds.length > 0)
+      ? editingPhaseTreatment.recordIds
+      : [editingPhaseTreatment.id];
+
+    let updateQuery = supabase.from("treatments").update({
+      stage: dbStage,
+      notes: updatedNotes
+    });
+
+    if (targetIds.length === 1) {
+      updateQuery = updateQuery.eq("id", targetIds[0]);
+    } else {
+      updateQuery = updateQuery.in("id", targetIds);
+    }
+
+    const { data: updatedDb, error: updateErr } = await updateQuery.select();
 
     if (updateErr) {
       console.error("Failed to update treatment phase in database:", updateErr?.message, updateErr?.code);
@@ -2248,13 +2371,19 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       return;
     }
 
-    const finalStage = (updatedDb?.stage as any) || dbStage;
-    const finalNotes = updatedDb?.notes || updatedNotes;
+    const firstUpdated = Array.isArray(updatedDb) && updatedDb.length > 0 ? updatedDb[0] : null;
+    const finalStage = (firstUpdated?.stage as any) || dbStage;
+    const finalNotes = firstUpdated?.notes || updatedNotes;
 
-    setTreatments(prev => prev.map(t => t.id === editingPhaseTreatment.id ? { ...t, stage: finalStage, notes: finalNotes } : t));
+    setTreatments(prev => prev.map(t => targetIds.includes(t.id) ? { ...t, stage: finalStage, notes: finalNotes } : t));
 
-    if (selectedTreatmentDetail && selectedTreatmentDetail.id === editingPhaseTreatment.id) {
-      setSelectedTreatmentDetail(prev => prev ? { ...prev, stage: finalStage, notes: finalNotes } : null);
+    if (selectedTreatmentDetail && (targetIds.includes(selectedTreatmentDetail.id) || selectedTreatmentDetail.id === editingPhaseTreatment.id)) {
+      setSelectedTreatmentDetail(prev => prev ? {
+        ...prev,
+        stage: finalStage,
+        notes: finalNotes,
+        associatedRecords: prev.associatedRecords?.map(rec => ({ ...rec, stage: finalStage, notes: finalNotes }))
+      } : null);
     }
 
     setSavingPhase(false);
@@ -9425,7 +9554,9 @@ ${clinicName}`;
             tooth: row.tooth_number || undefined,
             cost: Number(row.cost) || treatCostVal,
             diagnosis: row.diagnosis || undefined,
-            date: row.treatment_date ? convertToUiDate(row.treatment_date) : convertToUiDate(treatDateVal)
+            date: row.treatment_date ? convertToUiDate(row.treatment_date) : convertToUiDate(treatDateVal),
+            patientId: patientItem.uuid || patientItem.id,
+            createdAt: row.created_at || new Date().toISOString()
           }));
           setTreatments(prev => [...newTreatItems, ...prev]);
         } else {
@@ -9444,7 +9575,9 @@ ${clinicName}`;
               tooth: fdi,
               cost: treatCostVal,
               diagnosis: chartDiagnosis.trim() || undefined,
-              date: convertToUiDate(treatDateVal)
+              date: convertToUiDate(treatDateVal),
+              patientId: patientItem.uuid || patientItem.id,
+              createdAt: new Date().toISOString()
             };
           });
           setTreatments(prev => [...fallbackItems, ...prev]);
@@ -12852,13 +12985,30 @@ ${clinicName}`;
         {/* 1. Compact Patient Header Card */}
         <div className="bg-white dark:bg-slate-955 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 shadow-xs flex justify-between items-center">
           <div>
-            <h1 className="text-base font-semibold leading-6 text-slate-900 dark:text-white tracking-tight">
-              {tr.name}
-            </h1>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h1 className="text-base font-semibold leading-6 text-slate-900 dark:text-white tracking-tight">
+                {tr.name}
+              </h1>
+              {tr.teeth && tr.teeth.length >= 32 ? (
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-955/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                  All 32 teeth
+                </span>
+              ) : tr.teeth && tr.teeth.length > 0 ? (
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 font-mono border border-slate-200 dark:border-slate-700">
+                  Teeth: {tr.teeth.join(", ")}
+                </span>
+              ) : null}
+            </div>
             <p className="text-[12px] font-normal text-slate-400 dark:text-slate-500 mt-1">
               Patient: <span className="text-[14px] font-medium text-slate-800 dark:text-slate-200">{patName}</span>
               <span className="mx-2 text-slate-300 dark:text-slate-700">•</span>
               ID: <span className="text-[14px] font-medium text-slate-800 dark:text-slate-200">{patId}</span>
+              {tr.doctor && (
+                <>
+                  <span className="mx-2 text-slate-300 dark:text-slate-700">•</span>
+                  Doctor: <span className="text-[14px] font-medium text-slate-800 dark:text-slate-200">{tr.doctor}</span>
+                </>
+              )}
             </p>
           </div>
           {onBack && (
@@ -12944,6 +13094,83 @@ ${clinicName}`;
             </div>
           </div>
         </div>
+
+        {/* Associated Teeth & Individual Treatment Details */}
+        {tr.associatedRecords && tr.associatedRecords.length > 0 && (
+          <div className="bg-white dark:bg-slate-955 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-6 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+              <div>
+                <h2 className="text-base font-semibold leading-6 text-slate-900 dark:text-white tracking-tight">
+                  Teeth Involved &amp; Individual Details ({tr.associatedRecords.length} {tr.associatedRecords.length === 1 ? "record" : "records"})
+                </h2>
+                <p className="text-[12px] font-normal text-slate-400 dark:text-slate-500 mt-0.5">
+                  Individual tooth records, clinical notes, diagnosis, and phase progress
+                </p>
+              </div>
+              {tr.teeth && tr.teeth.length >= 32 ? (
+                <span className="px-3 py-1 rounded-lg text-xs font-bold bg-blue-50 text-blue-700 dark:bg-blue-955/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                  Full Mouth (32 Teeth)
+                </span>
+              ) : tr.teeth && tr.teeth.length > 0 ? (
+                <span className="px-3 py-1 rounded-lg text-xs font-mono font-bold bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
+                  {tr.teeth.length} {tr.teeth.length === 1 ? "Tooth" : "Teeth"}: {tr.teeth.join(", ")}
+                </span>
+              ) : null}
+            </div>
+
+            <div className="overflow-x-auto max-h-[300px] overflow-y-auto scrollbar-thin border border-slate-100 dark:border-slate-800 rounded-xl">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0 z-10 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[80px]">Tooth #</th>
+                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[180px]">Anatomy</th>
+                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[110px]">Status</th>
+                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[110px]">Date</th>
+                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[180px]">Clinical Notes / Diagnosis</th>
+                    <th className="py-2.5 px-3 whitespace-nowrap text-right min-w-[100px]">Cost (₹)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-900 text-slate-705">
+                  {tr.associatedRecords.map((rec) => {
+                    const toothObj = ALL_TEETH.find(t => t.fdi === rec.tooth || t.index === rec.tooth);
+                    const toothLabel = rec.tooth ? `#${rec.tooth}` : "—";
+                    const quad = toothObj ? (toothObj.fdi < 20 ? "Upper Right" : toothObj.fdi < 30 ? "Upper Left" : toothObj.fdi < 40 ? "Lower Left" : "Lower Right") : "";
+                    const typeName = toothObj?.type ? toothObj.type.charAt(0).toUpperCase() + toothObj.type.slice(1) : "";
+                    const toothName = toothObj ? `${quad} ${typeName}` : (rec.tooth ? `Tooth #${rec.tooth}` : "General / Consultation");
+                    return (
+                      <tr key={rec.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30">
+                        <td className="py-2.5 px-3 font-mono font-bold text-blue-600 dark:text-blue-400 whitespace-nowrap">{toothLabel}</td>
+                        <td className="py-2.5 px-3 font-medium whitespace-nowrap">{toothName}</td>
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          {rec.stage === "Completed" ? (
+                            <span className="h-[20px] px-2 rounded-full text-[10px] font-semibold inline-flex items-center gap-1 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                              ⚪ Completed
+                            </span>
+                          ) : rec.stage === "In Progress" ? (
+                            <span className="h-[20px] px-2 rounded-full text-[10px] font-semibold inline-flex items-center gap-1 bg-blue-50 text-blue-700 dark:bg-blue-955/40 dark:text-blue-300">
+                              🔵 In Progress
+                            </span>
+                          ) : (
+                            <span className="h-[20px] px-2 rounded-full text-[10px] font-semibold inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-955/40 dark:text-emerald-400">
+                              🟢 Active
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-500 whitespace-nowrap">{rec.date || "—"}</td>
+                        <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400 max-w-[240px] truncate" title={rec.notes || rec.diagnosis || "No specific notes"}>
+                          {rec.notes || rec.diagnosis || "—"}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-medium whitespace-nowrap">
+                          {rec.cost !== undefined && rec.cost > 0 ? `₹${rec.cost.toLocaleString()}` : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* 3. Two Main Cards Side-by-Side (Treatment Plan & Cost Summary) */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
@@ -13093,30 +13320,41 @@ ${clinicName}`;
       return renderTreatmentDetailsSection(selectedTreatmentDetail, () => setSelectedTreatmentDetail(null));
     }
 
+    const groupedTreatments = getGroupedTreatments(treatments, invoices);
+
     return (
       <div className="space-y-6 animate-fadeIn">
         <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs overflow-x-auto scrollbar-thin">
           <table className="w-full min-w-[760px] text-left border-collapse text-xs font-semibold">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 text-[10px] text-slate-400 uppercase tracking-wider">
-                <th className="py-3 px-3 whitespace-nowrap min-w-[180px]">Treatment Name</th>
-                <th className="py-3 px-3 whitespace-nowrap min-w-[160px]">Patient</th>
-                <th className="py-3 px-3 whitespace-nowrap min-w-[160px]">Doctor</th>
+                <th className="py-3 px-3 whitespace-nowrap min-w-[170px]">Treatment Name</th>
+                <th className="py-3 px-3 whitespace-nowrap min-w-[150px]">Patient</th>
+                <th className="py-3 px-3 whitespace-nowrap min-w-[150px]">Doctor</th>
+                <th className="py-3 px-3 whitespace-nowrap min-w-[140px]">Teeth Involved</th>
                 <th className="py-3 px-3 whitespace-nowrap min-w-[110px]">Phases</th>
-                <th className="py-3 px-3 whitespace-nowrap min-w-[120px]">Status</th>
+                <th className="py-3 px-3 whitespace-nowrap min-w-[110px]">Status</th>
                 <th className="py-3 px-3 whitespace-nowrap text-right min-w-[130px]">Estimated Cost (₹)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-900 text-slate-705">
-              {treatments.map((tr) => {
+              {groupedTreatments.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-8 text-center text-slate-400 font-normal">
+                    No active or planned treatment records found.
+                  </td>
+                </tr>
+              ) : (
+                groupedTreatments.map((tr) => {
                   const pTreatments = treatments.filter(t => t.patient && tr.patient && t.patient.toLowerCase() === tr.patient.toLowerCase());
                   const pAppts = appointments.filter(a => a.patientName && tr.patient && a.patientName.toLowerCase() === tr.patient.toLowerCase() && a.status !== "Cancelled");
                   const visits = getPatientVisitsList(tr, pTreatments, pAppts);
                   const total = visits.length;
                   const completed = visits.filter(v => v.isCompleted).length;
-                  const planName = tr.treatmentPlan || tr.name;
                   const costVal = tr.cost !== undefined && tr.cost > 0 ? tr.cost : 0;
                   const isCompleted = tr.stage === "Completed" || (total > 0 && completed === total);
+
+                  const teethList = tr.teeth || (tr.tooth ? [tr.tooth] : []);
 
                   return (
                     <tr
@@ -13127,6 +13365,28 @@ ${clinicName}`;
                       <td className="py-3.5 px-3 font-bold text-slate-900 dark:text-white whitespace-nowrap group-hover:text-blue-600 dark:group-hover:text-blue-400">{tr.name}</td>
                       <td className="py-3.5 px-3 whitespace-nowrap">{tr.patient}</td>
                       <td className="py-3.5 px-3 whitespace-nowrap">{tr.doctor}</td>
+                      <td className="py-3.5 px-3 whitespace-nowrap">
+                        {teethList.length === 0 ? (
+                          <span className="text-slate-400 font-normal">—</span>
+                        ) : teethList.length >= 32 ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 dark:bg-blue-955/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                            All 32 teeth
+                          </span>
+                        ) : teethList.length <= 5 ? (
+                          <span className="font-mono text-slate-800 dark:text-slate-200 text-[12px] font-semibold">
+                            {teethList.join(", ")}
+                          </span>
+                        ) : (
+                          <div className="flex items-center gap-1 max-w-[180px] overflow-hidden" title={teethList.join(", ")}>
+                            <span className="font-mono text-slate-800 dark:text-slate-200 text-[12px] font-semibold truncate">
+                              {teethList.slice(0, 4).join(", ")}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700 shrink-0">
+                              +{teethList.length - 4} more
+                            </span>
+                          </div>
+                        )}
+                      </td>
                       <td className="py-3.5 px-3 font-medium text-slate-700 dark:text-slate-300 whitespace-nowrap">
                         {completed} / {total} Phases
                       </td>
@@ -13134,6 +13394,10 @@ ${clinicName}`;
                         {isCompleted ? (
                           <span className="h-[22px] px-2.5 rounded-full text-[11px] font-semibold inline-flex items-center gap-1 bg-slate-100 text-slate-700 dark:bg-slate-900 dark:text-slate-300 border border-slate-200 dark:border-slate-800">
                             <span className="text-[9px]">⚪</span> Completed
+                          </span>
+                        ) : tr.stage === "In Progress" ? (
+                          <span className="h-[22px] px-2.5 rounded-full text-[11px] font-semibold inline-flex items-center gap-1 bg-blue-50 text-blue-700 dark:bg-blue-955/40 dark:text-blue-400 border border-blue-100 dark:border-blue-900/40">
+                            <span className="text-[9px]">🔵</span> In Progress
                           </span>
                         ) : (
                           <span className="h-[22px] px-2.5 rounded-full text-[11px] font-semibold inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-955/40 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/40">
@@ -13146,7 +13410,8 @@ ${clinicName}`;
                       </td>
                     </tr>
                   );
-                })}
+                })
+              )}
             </tbody>
           </table>
         </div>
