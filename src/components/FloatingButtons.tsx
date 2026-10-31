@@ -1,8 +1,73 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 
+const DEFAULT_BOTTOM = 24; // 24px (matches original bottom-6)
+const SPACING_ABOVE_FOOTER = 24; // 24px clearance above the top boundary of footer
+
 export default function FloatingButtons() {
+  const [bottomOffset, setBottomOffset] = useState<number>(DEFAULT_BOTTOM);
+
+  useEffect(() => {
+    let rafId: number | null = null;
+
+    const updatePosition = () => {
+      const footer = document.querySelector("footer");
+      if (!footer) {
+        setBottomOffset(DEFAULT_BOTTOM);
+        return;
+      }
+
+      const footerRect = footer.getBoundingClientRect();
+      const windowHeight = window.innerHeight;
+      const footerVisibleHeight = windowHeight - footerRect.top;
+
+      let newBottom = DEFAULT_BOTTOM;
+      if (footerVisibleHeight > 0) {
+        newBottom = Math.round(footerVisibleHeight + SPACING_ABOVE_FOOTER);
+      }
+
+      setBottomOffset((prev) => (prev === newBottom ? prev : newBottom));
+    };
+
+    const handleScrollOrResize = () => {
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        updatePosition();
+      });
+    };
+
+    // Calculate immediately on mount
+    updatePosition();
+
+    window.addEventListener("scroll", handleScrollOrResize, { passive: true });
+    window.addEventListener("resize", handleScrollOrResize, { passive: true });
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(() => {
+        handleScrollOrResize();
+      });
+      const footer = document.querySelector("footer");
+      if (footer) {
+        resizeObserver.observe(footer);
+      }
+    }
+
+    return () => {
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
+      }
+      window.removeEventListener("scroll", handleScrollOrResize);
+      window.removeEventListener("resize", handleScrollOrResize);
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
+    };
+  }, []);
+
   return (
     <>
       {/* Floating WhatsApp Button - Matching Figma Design (Green circle with white border & shadow) */}
@@ -15,7 +80,8 @@ export default function FloatingButtons() {
         transition={{ delay: 0.3, type: "spring", stiffness: 260, damping: 20 }}
         whileHover={{ scale: 1.08 }}
         whileTap={{ scale: 0.95 }}
-        className="fixed bottom-6 right-5 sm:right-8 z-50 flex items-center justify-center w-[54px] h-[54px] bg-[#25D366] rounded-full border-2 border-white shadow-[0_8px_24px_rgba(0,0,0,0.22)] text-white cursor-pointer hover:bg-[#20bd5a] transition-all duration-200"
+        style={{ bottom: `${bottomOffset}px` }}
+        className="fixed right-5 sm:right-8 z-50 flex items-center justify-center w-[54px] h-[54px] bg-[#25D366] rounded-full border-2 border-white shadow-[0_8px_24px_rgba(0,0,0,0.22)] text-white cursor-pointer hover:bg-[#20bd5a] transition-[background-color,box-shadow,border-color] duration-200"
         title="Chat on WhatsApp"
         aria-label="Chat on WhatsApp"
       >
