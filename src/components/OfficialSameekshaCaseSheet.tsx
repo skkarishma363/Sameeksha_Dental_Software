@@ -164,8 +164,9 @@ export const OfficialSameekshaCaseSheet: React.FC<OfficialSameekshaCaseSheetProp
 
     // Dynamically adjust font-size if text has many lines to ensure it stays in bounds
     const isLong = lines.length > 4;
-    const fontSize = isLong ? 18 : 21;
-    const lineGap = isLong ? 24 : 28;
+    const isVeryLong = lines.length > 6;
+    const fontSize = isVeryLong ? 15 : (isLong ? 18 : 21);
+    const lineGap = isVeryLong ? 20 : (isLong ? 24 : 28);
 
     return (
       <g>

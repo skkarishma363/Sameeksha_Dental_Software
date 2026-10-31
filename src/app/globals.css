@@ -576,6 +576,30 @@ section, [id] {
     page-break-inside: avoid !important;
     page-break-after: avoid !important;
   }
+  #print-area .patient-register-container {
+    width: 100% !important;
+    background: white !important;
+    color: black !important;
+    padding: 15mm !important;
+    box-sizing: border-box !important;
+  }
+  #print-area .patient-register-table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    page-break-inside: auto !important;
+  }
+  #print-area .patient-register-table thead {
+    display: table-header-group !important;
+  }
+  #print-area .patient-register-table tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+  #print-area .patient-register-table th,
+  #print-area .patient-register-table td {
+    border: 1px solid #cbd5e1 !important;
+    padding: 8px 10px !important;
+  }
   /* Hide print buttons and layout wrappers during print */
   #print-area .no-print {
     display: none !important;

@@ -844,6 +844,36 @@ export function formatTreatmentAdvisedFromChart(dentalChart: Record<number, stri
   return lines.join("\n");
 }
 
+export function getCombinedTreatmentAdvised(chartAdvice?: string | null, manualAdvice?: string | null): string {
+  const chart = (chartAdvice || "").trim();
+  const manual = (manualAdvice || "").trim();
+
+  if (!chart && !manual) return "";
+  if (!chart) return manual;
+  if (!manual) return chart;
+
+  // If manual text already contains the exact chart text
+  if (manual.toLowerCase().includes(chart.toLowerCase())) {
+    return manual;
+  }
+  if (chart.toLowerCase().includes(manual.toLowerCase())) {
+    return chart;
+  }
+
+  // Deduplicate identical lines
+  const chartLines = chart.split("\n").map(l => l.trim()).filter(Boolean);
+  const manualLines = manual.split("\n").map(l => l.trim()).filter(Boolean);
+
+  const combined = [...chartLines];
+  manualLines.forEach(line => {
+    if (!combined.some(cl => cl.toLowerCase() === line.toLowerCase())) {
+      combined.push(line);
+    }
+  });
+
+  return combined.join("\n");
+}
+
 interface OdontogramProps {
   chartData: Record<number, string | string[]>;
   selectedTooth?: number | null;
@@ -2996,6 +3026,11 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
   const [editNotes, setEditNotes] = useState("");
   const [isEditingCaseSheet, setIsEditingCaseSheet] = useState(false);
   const [editAgeStr, setEditAgeStr] = useState<string>("");
+  const [editPatientOpNumber, setEditPatientOpNumber] = useState("");
+  const [editCaseSheetDate, setEditCaseSheetDate] = useState("");
+  const [newPatId, setNewPatId] = useState<string | undefined>(undefined);
+  const [quickPatId, setQuickPatId] = useState<string | undefined>(undefined);
+  const [modalPatId, setModalPatId] = useState<string | undefined>(undefined);
   const [editRefDoctor, setEditRefDoctor] = useState("");
   const [editMedicalHistoryConditions, setEditMedicalHistoryConditions] = useState<string[]>([]);
   const [editMedicalHistoryOthers, setEditMedicalHistoryOthers] = useState("");
@@ -3371,7 +3406,12 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         setEditGender(p.gender || "Male");
         setEditBloodGroup(p.bloodGroup || "");
         setEditOccupation(p.occupation || "");
-        setEditRefDoctor(p.reference || p.preferredDentist || "");
+        setEditPatientOpNumber(p.id || "");
+        const savedCaseSheetDate = (p.visit && p.visit !== "—" && p.visit !== "-")
+          ? p.visit
+          : (p.firstVisit ? convertToUiDate(p.firstVisit) : (p.createdAt ? convertToUiDate(p.createdAt) : getTodayUiDate()));
+        setEditCaseSheetDate(savedCaseSheetDate);
+        setEditRefDoctor(p.reference !== undefined && p.reference !== null ? p.reference : (p.preferredDentist || ""));
 
         const addrParts = p.address ? p.address.split(",") : [];
         setEditAddressLine(p.addressLine || addrParts[0]?.trim() || p.address || "");
@@ -3385,7 +3425,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         setEditEmergencyContactName(p.emergencyContactName || "");
         setEditEmergencyContactPhone(p.emergencyContactPhone ? formatPhoneInput(p.emergencyContactPhone) : "+91 ");
         setEditFirstVisit(p.firstVisit || p.visit || "");
-        setEditLastVisit(p.visit || "");
+        setEditLastVisit(savedCaseSheetDate);
         setEditPreferredDentist(p.preferredDentist || "");
         setEditNotes(p.notes?.join("\n") || "");
 
@@ -3407,36 +3447,42 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
           setEditMedicalHistoryOthers("");
         }
 
-        // Clinical Case Details (CC, IOE, PD from p.notes)
+        // Clinical Case Details (CC, IOE, PD, and TA from p.notes)
         let cc = "";
         let io = "";
         let pd = "";
+        let ta = "";
 
         if (p.notes && Array.isArray(p.notes)) {
           p.notes.forEach(n => {
-            if (n.startsWith("CC:")) cc = n.replace("CC:", "").trim();
-            else if (n.startsWith("IOE:")) io = n.replace("IOE:", "").trim();
-            else if (n.startsWith("PD:")) pd = n.replace("PD:", "").trim();
+            if (n.startsWith("CC:")) cc = n.substring(3).trim();
+            else if (n.startsWith("IOE:")) io = n.substring(4).trim();
+            else if (n.startsWith("PD:")) pd = n.substring(3).trim();
+            else if (n.startsWith("TA:")) ta = n.substring(3).trim();
           });
         }
         setEditChiefComplaint(cc);
         setEditIntraOralExam(io);
         setEditProvisionalDiagnosis(pd);
 
-        // Treatment Advised synchronized from Dental Chart (or fallback to Treatments module)
-        const chartAdvised = formatTreatmentAdvisedFromChart(p.dentalChart);
-        if (chartAdvised) {
-          setEditTreatmentAdvised(chartAdvised);
+        // Restore manual treatment advised if saved; otherwise fallback to dental chart advice or treatments module
+        if (ta) {
+          setEditTreatmentAdvised(ta);
         } else {
-          const patTreatments = treatments.filter(t => t.patient === p.name);
-          const taLines: string[] = [];
-          if (patTreatments.length > 0) {
-            patTreatments.forEach(t => {
-              const toothInfo = t.tooth ? ` — Tooth #${t.tooth}` : "";
-              taLines.push(`${t.name}${toothInfo}`);
-            });
+          const chartAdvised = formatTreatmentAdvisedFromChart(p.dentalChart);
+          if (chartAdvised) {
+            setEditTreatmentAdvised(chartAdvised);
+          } else {
+            const patTreatments = treatments.filter(t => t.patient === p.name);
+            const taLines: string[] = [];
+            if (patTreatments.length > 0) {
+              patTreatments.forEach(t => {
+                const toothInfo = t.tooth ? ` — Tooth #${t.tooth}` : "";
+                taLines.push(`${t.name}${toothInfo}`);
+              });
+            }
+            setEditTreatmentAdvised(taLines.join("\n"));
           }
-          setEditTreatmentAdvised(taLines.join("\n"));
         }
       }
     }
@@ -3484,25 +3530,60 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       editCurrentMedications ? `Meds: ${editCurrentMedications}` : ""
     ].filter(Boolean).join(" | ") || "None";
 
-    // Build clinical case notes array (Chief Complaint, Intra Oral Exam, Provisional Diagnosis)
+    // Build clinical case notes array (Chief Complaint, Intra Oral Exam, Provisional Diagnosis, Treatment Advised)
     const clinicalNotes: string[] = [];
     if (editChiefComplaint.trim()) clinicalNotes.push(`CC: ${editChiefComplaint.trim()}`);
     if (editIntraOralExam.trim()) clinicalNotes.push(`IOE: ${editIntraOralExam.trim()}`);
     if (editProvisionalDiagnosis.trim()) clinicalNotes.push(`PD: ${editProvisionalDiagnosis.trim()}`);
+    if (editTreatmentAdvised.trim()) clinicalNotes.push(`TA: ${editTreatmentAdvised.trim()}`);
     if (editNotes && editNotes.trim()) {
       editNotes.split("\n").filter(n => !n.startsWith("CC:") && !n.startsWith("IOE:") && !n.startsWith("PD:") && !n.startsWith("TA:") && n.trim()).forEach(n => clinicalNotes.push(n.trim()));
     }
 
     const oldPatientItem = patients.find(p => p.id === selectedPatientId);
 
+    // Validate OP Number uniqueness if edited
+    const targetOpNumber = editPatientOpNumber.trim() || selectedPatientId;
+    if (!targetOpNumber) {
+      showToast("OP Number cannot be empty.", "error");
+      return;
+    }
+
+    if (targetOpNumber !== oldPatientItem?.id) {
+      const localDuplicate = patients.find(p => p.id.toLowerCase() === targetOpNumber.toLowerCase() && p.uuid !== oldPatientItem?.uuid);
+      if (localDuplicate) {
+        showToast(`OP Number "${targetOpNumber}" is already in use by patient "${localDuplicate.name}". Please enter a unique OP Number.`, "error");
+        return;
+      }
+
+      const { data: dbDuplicate, error: checkErr } = await supabase
+        .from("patients")
+        .select("id, name, patient_id")
+        .eq("patient_id", targetOpNumber)
+        .neq("id", oldPatientItem?.uuid || "00000000-0000-0000-0000-000000000000")
+        .maybeSingle();
+
+      if (checkErr) {
+        console.warn("Could not verify OP number uniqueness:", checkErr.message);
+      }
+      if (dbDuplicate) {
+        showToast(`OP Number "${targetOpNumber}" is already assigned to "${dbDuplicate.name}". Please enter a unique OP Number.`, "error");
+        return;
+      }
+    }
+
+    const finalCaseSheetDate = editCaseSheetDate.trim() || oldPatientItem?.visit || getTodayUiDate();
+
     const { error } = await supabase
       .from("patients")
       .update({
+        patient_id: targetOpNumber,
         name: fullName,
         phone: editMobile.trim(),
         age: editAge,
         gender: editGender,
         address: fullAddress,
+        visit: finalCaseSheetDate,
         medical_notes: mergedMedicalNotes,
         email: editEmail.trim() || null,
         blood_group: editBloodGroup.trim() || null,
@@ -3512,7 +3593,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         medical_history: editMedicalHistoryConditions,
         medical_history_others: editMedicalHistoryOthers.trim() || null
       })
-      .eq("patient_id", selectedPatientId);
+      .eq(oldPatientItem?.uuid ? "id" : "patient_id", oldPatientItem?.uuid || selectedPatientId);
 
     if (error) {
       console.error("Patient profile update failed:", error.message, error.code);
@@ -3569,9 +3650,10 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     }
 
     setPatients(prev => prev.map(p => {
-      if (p.id === selectedPatientId) {
+      if (p.uuid === oldPatientItem?.uuid || p.id === selectedPatientId) {
         return {
           ...p,
+          id: targetOpNumber,
           name: fullName,
           firstName: editFirstName.trim(),
           lastName: editLastName.trim(),
@@ -3593,7 +3675,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
           emergencyContactName: editEmergencyContactName.trim(),
           emergencyContactPhone: editEmergencyContactPhone.trim(),
           firstVisit: editFirstVisit,
-          visit: editLastVisit || p.visit,
+          visit: finalCaseSheetDate,
           preferredDentist: editPreferredDentist,
           reference: editRefDoctor.trim(),
           medicalHistory: editMedicalHistoryConditions,
@@ -3605,10 +3687,16 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       return p;
     }));
 
+    if (targetOpNumber !== selectedPatientId) {
+      setSelectedPatientId(targetOpNumber);
+      setAppointments(prev => prev.map(a => a.patientId === selectedPatientId ? { ...a, patientId: targetOpNumber, patientName: fullName } : a));
+      setInvoices(prev => prev.map(inv => inv.patientId === selectedPatientId ? { ...inv, patientId: targetOpNumber, patientName: fullName } : inv));
+    }
+
     // Update patient name in appointments, invoices, treatments, etc.
     if (oldPatientItem && oldPatientItem.name !== fullName) {
-      setAppointments(prev => prev.map(a => a.patientId === selectedPatientId ? { ...a, patientName: fullName } : a));
-      setInvoices(prev => prev.map(inv => inv.patientId === selectedPatientId ? { ...inv, patientName: fullName } : inv));
+      setAppointments(prev => prev.map(a => (a.patientId === targetOpNumber || a.patientId === selectedPatientId) ? { ...a, patientName: fullName } : a));
+      setInvoices(prev => (prev.map(inv => (inv.patientId === targetOpNumber || inv.patientId === selectedPatientId) ? { ...inv, patientName: fullName } : inv)));
       setTreatments(prev => prev.map(tr => tr.patient === oldPatientItem.name ? { ...tr, patient: fullName } : tr));
     }
 
@@ -3672,7 +3760,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         }
         return p;
       }));
-      setEditTreatmentAdvised(formatTreatmentAdvisedFromChart(updatedChart));
+      setEditTreatmentAdvised(prev => prev.trim() ? prev : formatTreatmentAdvisedFromChart(updatedChart));
       return;
     }
 
@@ -3723,7 +3811,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       }
       return p;
     }));
-    setEditTreatmentAdvised(formatTreatmentAdvisedFromChart(currentChart));
+    setEditTreatmentAdvised(prev => prev.trim() ? prev : formatTreatmentAdvisedFromChart(currentChart));
 
     setActiveTreatment(treatmentName);
     showToast(`Added ${treatmentName} to all 32 teeth.`, "success");
@@ -3753,7 +3841,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       }
       return p;
     }));
-    setEditTreatmentAdvised("");
+    // Preserves manual treatment advice when dental chart is cleared
 
     setShowClearAllConfirm(false);
     setActiveTreatment(null);
@@ -6178,9 +6266,11 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     setQuickReference("");
     setQuickMedicalHistory([]);
     setQuickMedicalHistoryOthers("");
+    setQuickPatId(undefined);
   };
 
   const registerPatient = async (patientData: {
+    patientId?: string;
     name: string;
     phone: string;
     age: number | string;
@@ -6331,23 +6421,44 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
         }
       }
 
-      // Generate sequential Patient ID starting from 19000
+      // Generate sequential Patient ID starting from 19000, or use user-specified custom OP number
       let nextIdCandidate = "";
-      try {
-        const { data: rpcNextId } = await supabase.rpc("get_next_patient_id");
-        if (rpcNextId && typeof rpcNextId === "string") {
-          nextIdCandidate = rpcNextId;
+      if (patientData.patientId && patientData.patientId.trim()) {
+        const customOpNum = patientData.patientId.trim();
+        // Check uniqueness locally
+        const localDup = patients.find(p => p.id?.trim().toLowerCase() === customOpNum.toLowerCase());
+        if (localDup) {
+          showToast(`OP Number "${customOpNum}" is already in use by patient "${localDup.name}". Please enter a unique OP Number.`, "error");
+          return false;
         }
-      } catch (rpcErr) {
-        console.warn("get_next_patient_id RPC query error:", rpcErr);
-      }
-
-      if (!nextIdCandidate) {
-        const { data: dbAllPats } = await supabase
+        // Check uniqueness on Supabase
+        const { data: dbDup } = await supabase
           .from("patients")
-          .select("patient_id");
-        const combinedList = dbAllPats && dbAllPats.length > 0 ? dbAllPats.map(p => ({ id: p.patient_id })) : patients;
-        nextIdCandidate = getNextSequentialPatientId(combinedList);
+          .select("id, name")
+          .eq("patient_id", customOpNum)
+          .maybeSingle();
+        if (dbDup) {
+          showToast(`OP Number "${customOpNum}" is already assigned to "${dbDup.name}". Please enter a unique OP Number.`, "error");
+          return false;
+        }
+        nextIdCandidate = customOpNum;
+      } else {
+        try {
+          const { data: rpcNextId } = await supabase.rpc("get_next_patient_id");
+          if (rpcNextId && typeof rpcNextId === "string") {
+            nextIdCandidate = rpcNextId;
+          }
+        } catch (rpcErr) {
+          console.warn("get_next_patient_id RPC query error:", rpcErr);
+        }
+
+        if (!nextIdCandidate) {
+          const { data: dbAllPats } = await supabase
+            .from("patients")
+            .select("patient_id");
+          const combinedList = dbAllPats && dbAllPats.length > 0 ? dbAllPats.map(p => ({ id: p.patient_id })) : patients;
+          nextIdCandidate = getNextSequentialPatientId(combinedList);
+        }
       }
 
       // Perform database insertion with concurrency retry
@@ -6392,8 +6503,12 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
           break;
         }
 
-        // If duplicate patient_id collision occurs under high concurrency, fetch fresh next ID and retry
+        // If duplicate patient_id collision occurs under high concurrency, fetch fresh next ID and retry if auto-generated
         if (error?.message?.includes("unique") || error?.message?.includes("patient_id") || error?.code === "23505") {
+          if (patientData.patientId && patientData.patientId.trim()) {
+            showToast(`OP Number "${patientData.patientId.trim()}" is already assigned to another patient. Please choose a different OP Number.`, "error");
+            return false;
+          }
           const { data: freshPats } = await supabase.from("patients").select("patient_id");
           nextIdCandidate = getNextSequentialPatientId(freshPats || []);
           continue;
@@ -6483,6 +6598,8 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
       setNewPatAddress("");
       setNewPatAllergies("None");
       setNewPatAge("");
+      setNewPatId(undefined);
+      setModalPatId(undefined);
       if (activeModal === "addPatient") setActiveModal(null);
       if (activeSubTab === "Add Patient") setActiveSubTab("All Patients");
     }
@@ -6653,6 +6770,7 @@ export default function SaaSMainDashboard({ initialTab = "Dashboard" }: { initia
     e.preventDefault();
     const fullName = `${quickFirstName.trim()} ${quickLastName.trim()}`;
     const saved = await registerPatient({
+      patientId: quickPatId?.trim() || undefined,
       name: fullName,
       phone: quickMobile,
       age: quickAge,
@@ -7662,7 +7780,13 @@ ${clinicName}`;
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <Label htmlFor="qPatID" className="form-label-custom">Patient ID</Label>
-                    <Input id="qPatID" value={getNextSequentialPatientId(patients)} disabled className="form-field-custom bg-slate-50 dark:bg-slate-900 opacity-60 cursor-not-allowed font-bold" />
+                    <Input
+                      id="qPatID"
+                      value={quickPatId !== undefined ? quickPatId : getNextSequentialPatientId(patients)}
+                      onChange={e => setQuickPatId(e.target.value)}
+                      placeholder="e.g. 19052"
+                      className="form-field-custom font-bold"
+                    />
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="qMobile" className="form-label-custom">Mobile Number</Label>
@@ -9260,7 +9384,7 @@ ${clinicName}`;
           }
           return p;
         }));
-        setEditTreatmentAdvised(formatTreatmentAdvisedFromChart(currentChart));
+        setEditTreatmentAdvised(prev => prev.trim() ? prev : formatTreatmentAdvisedFromChart(currentChart));
 
         // Synchronize with Treatments History Log
         const doctorObj = doctors.find(d => d.name === chartDoctor);
@@ -9360,7 +9484,7 @@ ${clinicName}`;
 
         setPatients(prev => prev.map(p => p.id === patientItem.id ? { ...p, dentalChart: {} } : p));
         setTreatments(prev => prev.filter(t => t.patient !== patientItem.name));
-        setEditTreatmentAdvised("");
+        // Preserves manual treatment advice when dental chart is cleared
         setSelectedTeeth([]);
         setChartSelectedTooth(null);
         setShowClearAllConfirm(false);
@@ -9379,7 +9503,7 @@ ${clinicName}`;
                 <ChevronLeft className="h-4 w-4" />
               </button>
               <div>
-                <span className="text-xs text-slate-400 font-bold block">PATIENT FILE: {patientItem.id}</span>
+                <span className="text-xs text-slate-400 font-bold block">PATIENT FILE: {isEditingCaseSheet && editPatientOpNumber ? editPatientOpNumber : patientItem.id}</span>
                 <span className="text-lg font-bold text-slate-900 dark:text-white mt-0.5 block">{patientItem.name}</span>
               </div>
             </div>
@@ -9476,30 +9600,53 @@ ${clinicName}`;
                   <div className="bg-slate-200/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 rounded-xl p-3 sm:p-6 flex flex-col items-center justify-center print:hidden shadow-inner">
                     <div className="w-full max-w-[210mm] bg-white rounded-lg shadow-2xl overflow-hidden border border-slate-300">
                       <OfficialSameekshaCaseSheet
-                        patient={patientItem}
+                        patient={{ ...patientItem, id: editPatientOpNumber || patientItem.id, patient_id: editPatientOpNumber || patientItem.id }}
                         chiefComplaint={editChiefComplaint}
                         intraOralExam={editIntraOralExam}
                         provisionalDiagnosis={editProvisionalDiagnosis}
-                        treatmentAdvised={formatTreatmentAdvisedFromChart(patientItem.dentalChart) || editTreatmentAdvised}
+                        treatmentAdvised={getCombinedTreatmentAdvised(formatTreatmentAdvisedFromChart(patientItem.dentalChart), editTreatmentAdvised)}
                         medicalHistoryConditions={editMedicalHistoryConditions}
                         medicalHistoryOthers={editMedicalHistoryOthers}
                         currentMedications={editCurrentMedications}
                         refDoctor={editRefDoctor}
-                        dateStr={(patientItem.visit && patientItem.visit !== "—") ? patientItem.visit : getTodayUiDate()}
+                        dateStr={editCaseSheetDate || ((patientItem.visit && patientItem.visit !== "—") ? patientItem.visit : getTodayUiDate())}
                       />
                     </div>
                   </div>
                 ) : (
-                  <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-7 shadow-xs space-y-6 text-xs animate-fadeIn print:hidden">
+                  <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-7 shadow-xs space-y-6 text-xs animate-fadeIn print:hidden">
                   {/* Top Header Row with Date (Screen Only) */}
                   <div className="flex justify-between items-center border-b border-slate-200 dark:border-slate-800 pb-3">
                     <div className="flex items-center gap-2">
                       <FileText className="h-5 w-5 text-blue-600" />
                       <span className="font-bold text-sm tracking-wide text-slate-900 dark:text-white uppercase">DENTAL CASE SHEET</span>
                     </div>
-                    <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    <div className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                       <span className="text-slate-400 font-medium">Date: </span>
-                      <strong>{(patientItem.visit && patientItem.visit !== "—") ? patientItem.visit : (patientItem.createdAt ? convertToUiDate(patientItem.createdAt) : getTodayUiDate())}</strong>
+                      {isEditingCaseSheet ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="text"
+                            value={editCaseSheetDate}
+                            onChange={e => setEditCaseSheetDate(e.target.value)}
+                            placeholder="e.g. 27 Oct 2026"
+                            className="h-7 w-28 text-xs font-bold bg-white dark:bg-slate-900"
+                          />
+                          <input
+                            type="date"
+                            aria-label="Pick date"
+                            className="h-7 w-7 opacity-70 hover:opacity-100 cursor-pointer p-0 border border-slate-200 dark:border-slate-700 rounded bg-transparent"
+                            value={convertToDbDate(editCaseSheetDate)}
+                            onChange={e => {
+                              if (e.target.value) {
+                                setEditCaseSheetDate(formatDate(e.target.value));
+                              }
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <strong>{editCaseSheetDate || ((patientItem.visit && patientItem.visit !== "—") ? patientItem.visit : getTodayUiDate())}</strong>
+                      )}
                     </div>
                   </div>
 
@@ -9509,7 +9656,19 @@ ${clinicName}`;
                       <h3 className="font-bold text-xs text-slate-900 dark:text-blue-300 uppercase tracking-wider">
                         PATIENT / CONTACT INFORMATION
                       </h3>
-                      <span className="text-[11px] font-bold text-slate-500">ID: {patientItem.id}</span>
+                      {isEditingCaseSheet ? (
+                        <div className="flex items-center gap-1.5">
+                          <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">OP Number:</label>
+                          <Input
+                            value={editPatientOpNumber}
+                            onChange={e => setEditPatientOpNumber(e.target.value)}
+                            placeholder="e.g. 19051"
+                            className="h-7 w-28 text-xs font-bold font-mono bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 border-blue-300 dark:border-blue-700 px-2 py-0"
+                          />
+                        </div>
+                      ) : (
+                        <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 font-mono">OP No: {patientItem.id}</span>
+                      )}
                     </div>
 
                     <div className="p-4 sm:p-5 print:p-3 grid grid-cols-1 md:grid-cols-2 print:grid-cols-2 gap-x-8 gap-y-4 print:gap-y-2">
@@ -10196,7 +10355,7 @@ ${clinicName}`;
                                                           }
                                                           return p;
                                                         }));
-                                                        setEditTreatmentAdvised(formatTreatmentAdvisedFromChart(currentChart));
+                                                        setEditTreatmentAdvised(prev => prev.trim() ? prev : formatTreatmentAdvisedFromChart(currentChart));
                                                         setTreatments(prev => prev.filter(t => !(t.patient === patientItem.name && t.name.toLowerCase() === group.procedure.toLowerCase())));
                                                         showToast(`Removed ${group.procedure} record.`, "success");
                                                       }}
@@ -10283,7 +10442,7 @@ ${clinicName}`;
                           />
                         ) : (
                           <div className="min-h-[48px] print:min-h-0 p-2.5 print:p-2 bg-slate-50/60 dark:bg-slate-900/60 rounded border border-slate-100 dark:border-slate-800 text-slate-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed font-normal">
-                            {formatTreatmentAdvisedFromChart(patientItem.dentalChart) || editTreatmentAdvised || <span className="text-slate-400 italic">No treatment advised recorded.</span>}
+                            {getCombinedTreatmentAdvised(formatTreatmentAdvisedFromChart(patientItem.dentalChart), editTreatmentAdvised) || <span className="text-slate-400 italic">No treatment advised recorded.</span>}
                           </div>
                         )}
                       </div>
@@ -10295,16 +10454,16 @@ ${clinicName}`;
                 {/* AUTHENTIC PAPER CASE SHEET PRINT TEMPLATE */}
                 <div id="print-area" className="hidden print:block w-full">
                   <OfficialSameekshaCaseSheet
-                    patient={patientItem}
+                    patient={{ ...patientItem, id: editPatientOpNumber || patientItem.id, patient_id: editPatientOpNumber || patientItem.id }}
                     chiefComplaint={editChiefComplaint}
                     intraOralExam={editIntraOralExam}
                     provisionalDiagnosis={editProvisionalDiagnosis}
-                    treatmentAdvised={formatTreatmentAdvisedFromChart(patientItem.dentalChart) || editTreatmentAdvised}
+                    treatmentAdvised={getCombinedTreatmentAdvised(formatTreatmentAdvisedFromChart(patientItem.dentalChart), editTreatmentAdvised)}
                     medicalHistoryConditions={editMedicalHistoryConditions}
                     medicalHistoryOthers={editMedicalHistoryOthers}
                     currentMedications={editCurrentMedications}
                     refDoctor={editRefDoctor}
-                    dateStr={(patientItem.visit && patientItem.visit !== "—") ? patientItem.visit : getTodayUiDate()}
+                    dateStr={editCaseSheetDate || ((patientItem.visit && patientItem.visit !== "—") ? patientItem.visit : getTodayUiDate())}
                   />
                 </div>
               </div>
@@ -10391,7 +10550,7 @@ ${clinicName}`;
                                             .eq("patient_id", selectedPatientId);
 
                                           setPatients(prev => prev.map(p => p.id === selectedPatientId ? { ...p, dentalChart: currentChart } : p));
-                                          setEditTreatmentAdvised(formatTreatmentAdvisedFromChart(currentChart));
+                                          setEditTreatmentAdvised(prev => prev.trim() ? prev : formatTreatmentAdvisedFromChart(currentChart));
                                         }
                                       }
                                       setTreatments(prev => prev.filter(t => t.id !== tr.id));
@@ -12386,6 +12545,14 @@ ${clinicName}`;
                     All ({patients.length})
                   </button>
                 </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => window.print()}
+                  className="border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 font-bold text-xs h-9 rounded-lg px-3.5 cursor-pointer flex items-center gap-1.5"
+                >
+                  <Printer className="h-4 w-4 text-slate-500" /> Print Patient List
+                </Button>
                 <Button onClick={() => setActiveSubTab("Add Patient")} className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs h-9 rounded-lg px-4 cursor-pointer">
                   <Plus className="h-4 w-4 mr-1.5" /> Register Patient
                 </Button>
@@ -12395,9 +12562,10 @@ ${clinicName}`;
             <table className="w-full min-w-[760px] text-left border-collapse text-xs font-semibold">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] text-slate-450 uppercase tracking-wider font-bold">
+                  <th className="py-3 px-3 whitespace-nowrap min-w-[100px]">OP Number</th>
                   <th className="py-3 px-3 whitespace-nowrap min-w-[170px]">Patient Name</th>
-                  <th className="py-3 px-3 whitespace-nowrap min-w-[140px]">Phone</th>
-                  <th className="py-3 px-3 whitespace-nowrap min-w-[120px]">Age</th>
+                  <th className="py-3 px-3 whitespace-nowrap min-w-[140px]">Phone Number</th>
+                  <th className="py-3 px-3 whitespace-nowrap min-w-[100px]">Age</th>
                   <th className="py-3 px-3 whitespace-nowrap min-w-[110px]">Last Visit</th>
                   <th className="py-3 px-3 whitespace-nowrap min-w-[100px]">Balance</th>
                   <th className="py-3 px-3 whitespace-nowrap min-w-[100px]">Status</th>
@@ -12416,6 +12584,16 @@ ${clinicName}`;
                   })
                   .map((pat) => (
                     <tr key={pat.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/10 transition-colors">
+                      <td className="py-3.5 px-3 whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPatientId(pat.id)}
+                          className="font-mono font-bold text-blue-600 hover:underline cursor-pointer text-[13px] sm:text-[14px]"
+                          title="View Patient Profile / Case Sheet"
+                        >
+                          {pat.id}
+                        </button>
+                      </td>
                       <td className="py-3.5 px-3 font-semibold text-slate-900 dark:text-white whitespace-nowrap">
                         <button onClick={() => setSelectedPatientId(pat.id)} className="hover:underline text-left text-[16px] sm:text-[17px] font-semibold cursor-pointer">
                           {pat.name}
@@ -12461,6 +12639,70 @@ ${clinicName}`;
               </tbody>
             </table>
           </div>
+
+          {/* Printable Patient Register (visible strictly during window.print()) */}
+          <div id="print-area" className="hidden print:block w-full">
+            <div className="patient-register-container p-6">
+              <div className="border-b-2 border-slate-800 pb-3 mb-4 flex justify-between items-end">
+                <div>
+                  <h1 className="text-2xl font-black uppercase tracking-wide text-slate-900">Sameeksha Super Speciality Dental Hospital</h1>
+                  <p className="text-xs text-slate-600 font-medium mt-0.5">Comprehensive Dental Care &amp; Implant Center</p>
+                  <h2 className="text-base font-bold text-slate-800 mt-2">Patient Register</h2>
+                </div>
+                <div className="text-right text-xs text-slate-600 space-y-0.5">
+                  <p><span className="font-semibold text-slate-700">Filter:</span> {patientFilterStatus} Patients{patientsDirectoryQuery.trim() ? ` (Search: "${patientsDirectoryQuery.trim()}")` : ""}</p>
+                  <p><span className="font-semibold text-slate-700">Total Records:</span> {
+                    patients.filter(pat => {
+                      const isArchived = pat.status === "Archived" || pat.status === "Inactive";
+                      if (patientFilterStatus === "Active" && isArchived) return false;
+                      if (patientFilterStatus === "Archived" && !isArchived) return false;
+                      if (!patientsDirectoryQuery.trim()) return true;
+                      const q = patientsDirectoryQuery.toLowerCase();
+                      return pat.name.toLowerCase().includes(q) || pat.id.toLowerCase().includes(q) || pat.phone.includes(q);
+                    }).length
+                  }</p>
+                  <p><span className="font-semibold text-slate-700">Print Date:</span> {getTodayUiDate()}</p>
+                </div>
+              </div>
+
+              <table className="patient-register-table w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-100 font-bold text-slate-800 text-[11px] uppercase tracking-wider">
+                    <th className="py-2.5 px-3 border border-slate-300 w-[15%]">OP Number</th>
+                    <th className="py-2.5 px-3 border border-slate-300 w-[35%]">Patient Name</th>
+                    <th className="py-2.5 px-3 border border-slate-300 w-[20%]">Phone Number</th>
+                    <th className="py-2.5 px-3 border border-slate-300 w-[15%]">Age</th>
+                    <th className="py-2.5 px-3 border border-slate-300 w-[15%]">Last Visit</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {patients
+                    .filter(pat => {
+                      const isArchived = pat.status === "Archived" || pat.status === "Inactive";
+                      if (patientFilterStatus === "Active" && isArchived) return false;
+                      if (patientFilterStatus === "Archived" && !isArchived) return false;
+                      if (!patientsDirectoryQuery.trim()) return true;
+                      const q = patientsDirectoryQuery.toLowerCase();
+                      return pat.name.toLowerCase().includes(q) || pat.id.toLowerCase().includes(q) || pat.phone.includes(q);
+                    })
+                    .map((pat, idx) => (
+                      <tr key={pat.id || idx}>
+                        <td className="py-2 px-3 font-mono font-bold text-slate-900 border border-slate-300">{pat.id}</td>
+                        <td className="py-2 px-3 font-semibold text-slate-900 border border-slate-300">{pat.name}</td>
+                        <td className="py-2 px-3 text-slate-700 border border-slate-300">{pat.phone}</td>
+                        <td className="py-2 px-3 text-slate-700 border border-slate-300">{pat.age} Years ({pat.gender?.[0] || "-"})</td>
+                        <td className="py-2 px-3 text-slate-700 border border-slate-300">{pat.visit || "—"}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+
+              <div className="mt-4 pt-3 border-t border-slate-300 flex justify-between text-[10px] text-slate-500">
+                <span>Sameeksha Super Speciality Dental Hospital &bull; Confidential Patient Register</span>
+                <span>Printed on {getTodayUiDate()}</span>
+              </div>
+            </div>
+          </div>
           </>
         )}
 
@@ -12479,6 +12721,7 @@ ${clinicName}`;
             <form onSubmit={async (e) => {
               e.preventDefault();
               const saved = await registerPatient({
+                patientId: newPatId?.trim() || undefined,
                 name: newPatName,
                 phone: newPatPhone,
                 age: newPatAge,
@@ -12492,12 +12735,19 @@ ${clinicName}`;
                 setNewPatAddress("");
                 setNewPatAllergies("None");
                 setNewPatAge("");
+                setNewPatId(undefined);
                 setActiveSubTab("All Patients");
               }
             }} className="space-y-4">
               <div className="space-y-1.5">
                 <Label htmlFor="subTabPatId">Patient ID</Label>
-                <Input id="subTabPatId" value={getNextSequentialPatientId(patients)} disabled className="bg-slate-50 dark:bg-slate-900 opacity-60 cursor-not-allowed font-bold" />
+                <Input
+                  id="subTabPatId"
+                  value={newPatId !== undefined ? newPatId : getNextSequentialPatientId(patients)}
+                  onChange={e => setNewPatId(e.target.value)}
+                  placeholder="e.g. 19052"
+                  className="font-bold"
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="newPatName">Patient Full Name</Label>
@@ -16537,6 +16787,7 @@ ${clinicName}`;
                 <form onSubmit={async (e) => {
                   e.preventDefault();
                   const saved = await registerPatient({
+                    patientId: modalPatId?.trim() || undefined,
                     name: newPatName,
                     phone: newPatPhone,
                     age: newPatAge,
@@ -16550,13 +16801,20 @@ ${clinicName}`;
                     setNewPatAddress("");
                     setNewPatAllergies("None");
                     setNewPatAge("");
+                    setModalPatId(undefined);
                     setActiveModal(null);
                   }
                 }} className="flex flex-col min-h-0 h-full">
                   <div className="flex-1 overflow-y-auto space-y-4 pr-1 py-1">
                     <div className="space-y-1.5">
                       <Label htmlFor="modalPatId">Patient ID</Label>
-                      <Input id="modalPatId" value={getNextSequentialPatientId(patients)} disabled className="bg-slate-50 dark:bg-slate-900 opacity-60 cursor-not-allowed font-bold" />
+                      <Input
+                        id="modalPatId"
+                        value={modalPatId !== undefined ? modalPatId : getNextSequentialPatientId(patients)}
+                        onChange={e => setModalPatId(e.target.value)}
+                        placeholder="e.g. 19052"
+                        className="font-bold"
+                      />
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="newPatName">Patient Full Name</Label>
